@@ -5,7 +5,11 @@ the **loops** (maker-checker, PR-review, timer, goal) and their **failure modes*
 **workflow graph**, the **roles + rubric + evidence** discipline with a first-class
 **e2e requirement + edge-case battery**, the **rules + scripts contracts**, the
 **tracking system** (state/roadmap/task/changelog/decisions/blockers), and
-**runtime continuity**. It ships **no requirement** — the product vision, the roadmap
+**runtime continuity**. It also ships an **opt-in parallel mode** — concurrent build
+**lanes** (git worktrees) coordinated by a git-native **claim ledger** so no feature is
+dropped or double-claimed, and an **integration queue** that merges lanes to `main` one at a
+time with a full re-run so no lane breaks another. It ships **no requirement** — the product
+vision, the roadmap
 features, the phases and the architecture are left as empty placeholders you fill in
 after scaffolding.
 
@@ -45,11 +49,13 @@ gracefully, it does not abort the scaffold:
 
 After creating the tree, verify the bootstrap actually landed — don't assume:
 
-1. Every `FILE:` path in this document exists on disk (**38 files**).
+1. Every `FILE:` path in this document exists on disk (**41 files**).
 2. No file still contains the literal `<<<BEGIN` / `END>>>` delimiters (a transcription leak).
 3. `graph/graph.json` parses as JSON.
 4. Machinery files contain **no** `<<FILL: …>>` markers; only the 9 requirement files +
    `CLAUDE.md` Commands + `AGENTS.md` Tech-stack + the three first-run tracking files do.
+   (`LANES.md` + the two parallel-loop files are machinery — no `<<FILL>>`; parallel mode is
+   opt-in and ships off, `MAX_LANES=1`.)
 
 Report the counts. Then delete this bootstrap file.
 
@@ -60,8 +66,13 @@ these — and only these:
 
 **The product + scope (always):**
 - `.harness/product/PRODUCT.md`, `.harness/product/PERSONAS.md`
-- `.harness/ROADMAP.md` (+ one `phases/PHASE-01-*.md` per phase)
+- `.harness/ROADMAP.md` (+ one `phases/PHASE-01-*.md` per phase) — include each feature's
+  `deps:` and the **parallel plan** (which features run at once vs. which chain sequentially).
 - `.harness/rules/scope-guard.md` (the in-scope / off-limits lists from the ROADMAP)
+
+Parallel mode is **machinery, nothing to fill** — it ships off (`MAX_LANES=1` in `LANES.md`),
+behaving exactly like the single-feature loop. To turn it on, set `MAX_LANES > 1` and make sure
+your ROADMAP deps are accurate; the ready set and the lane/integration loops do the rest.
 
 **The architecture — deferred, and shaped to the project type:**
 - `.harness/architecture/ARCHITECTURE.md` + `MODULES.md`, then encode the real import rules in
@@ -93,13 +104,16 @@ as-is.
 ├── CHANGELOG.md              # completed-with-evidence history (skeleton)
 ├── DECISIONS.md              # decision log (skeleton)
 ├── BLOCKERS.md               # known blockers (skeleton)
+├── LANES.md                   # parallel lanes + claim ledger + integration queue (skeleton)
 ├── loops/
 │   ├── goal.md               # single-goal iterate-to-done loop     ── machinery
 │   ├── maker-checker-loop.md # build/verify cycle, no human         ── machinery
 │   ├── pr-review-loop.md     # gate next feature on a clean PR       ── machinery
+│   ├── parallel-loop.md      # spawn/claim/run concurrent lanes       ── machinery
+│   ├── integration-loop.md   # merge-queue: lanes -> main one at a time ── machinery
 │   ├── timer-loop.md         # scheduled health heartbeat            ── machinery
 │   ├── failure-modes.md      # how the loop handles abnormal states  ── machinery
-│   └── loop-state.md         # live loop state (reset template)
+│   └── loop-state.md         # live loop state, per-lane (reset template)
 ├── graph/
 │   ├── workflow-graph.md     # the loop drawn: nodes/edges/routing   ── machinery
 │   └── graph.json            # machine-readable twin                 ── machinery
@@ -132,7 +146,10 @@ as-is.
 
 Statuses used everywhere: `NOT STARTED` · `IN PROGRESS` · `BLOCKED` · `IN REVIEW` ·
 `COMPLETE` · `DEPRECATED`. Feature ids are `F001`, `F002`, … Branches are `feat/<FID>`
-(or `docs/<slug>`/`chore/<slug>` for harness-only work).
+(or `docs/<slug>`/`chore/<slug>` for harness-only work). `IN PROGRESS` is **per lane**: with
+`MAX_LANES=1` (the default) there is exactly one, which is the classic single-feature loop;
+with parallel mode on, each lane owns one. Lanes are git worktrees named `lane/<FID>`; the
+claim ledger + integration queue live in `LANES.md` (`loops/parallel-loop.md`).
 
 ═══════════════════════════════════════════════════════════════════════════════════════
                                     MACHINERY
@@ -207,20 +224,26 @@ Build the product the requirement describes — never a shortcut that fakes the 
 
 ## Read this order, every session (before touching code)
 1. `PROJECT_STATE.md` — MASTER FILE. Where the project is right now.
-2. `CURRENT_TASK.md` — the one feature to work on and its exact next step.
-3. `ROADMAP.md` — all features across the phases, with status.
-4. The active phase file under `phases/` — acceptance criteria for the current feature.
-5. `DECISIONS.md` + `BLOCKERS.md` — what's decided, what's stuck.
-6. **Then inspect the actual code.** The codebase is the source of truth for what EXISTS;
+2. `LANES.md` — which lanes exist, what each has claimed, the integration queue. Identify
+   **which lane you are** (your worktree/branch) before anything, or that you are the single
+   default lane. Skip only if parallel mode is off (`MAX_LANES=1`) and you are in the main tree.
+3. `CURRENT_TASK.md` — your lane's one feature and its exact next step.
+4. `ROADMAP.md` — all features across the phases, with status + deps.
+5. The active phase file under `phases/` — acceptance criteria for the current feature.
+6. `DECISIONS.md` + `BLOCKERS.md` — what's decided, what's stuck.
+7. **Then inspect the actual code.** The codebase is the source of truth for what EXISTS;
    the tracking files are the source of truth for intended state + history. If they
    disagree: inspect, correct the tracking files, and note the discrepancy in `CHANGELOG.md`.
 
 ## The ten rules
 1. **Tracking before memory.** Never rely on conversation history. The `.harness/`
    tracking files are the state of the project. Read them first; update them before you stop.
-2. **One feature at a time.** Work only the single feature that is `IN PROGRESS` (named in
-   `PROJECT_STATE.md`, detailed in `CURRENT_TASK.md`). Do not start the next until the
-   current one is verified.
+2. **One feature at a time — per lane.** Each lane works exactly one feature that is
+   `IN PROGRESS` (its row in `LANES.md`, detailed in that lane's `CURRENT_TASK.md`). Do not
+   start the next in your lane until the current one is verified. With `MAX_LANES=1` this is
+   the single global active feature. Across lanes: never touch a feature another lane has
+   claimed, and claim before you build (`loops/parallel-loop.md` — the claim is a commit to
+   `main`, which is the mutex). No feature is ever `IN PROGRESS` with zero or two owners.
 3. **No victory without evidence.** A feature is `COMPLETE` only when every acceptance
    criterion in its phase file is met AND verification is recorded in `CHANGELOG.md`:
    happy path + the applicable `verification/edge-cases.md` battery + error paths + the FULL
@@ -244,7 +267,10 @@ Build the product the requirement describes — never a shortcut that fakes the 
    feature on `feat/<FID>` (or `docs/<slug>`/`chore/<slug>` for harness-only work,
    `rules/conventions.md`) with the message format in `rules/conventions.md`. No drive-by
    refactors. After a feature passes: push, open/reuse a PR, review it, and fix findings
-   until clean before starting the next feature (`loops/pr-review-loop.md`).
+   until clean (`loops/pr-review-loop.md`); then hand the lane to the **integration queue**
+   (`loops/integration-loop.md`) — a clean PR is not merged ad hoc. Start your lane's next
+   feature only once the current one is queued (or merged). A feature is not done until it is
+   merged to `main` with the full suite + e2e green **on the integrated main**.
 10. **Observability is not optional.** Structured logs at startup, boundaries, and errors
     (`scripts/SCRIPTS.md` → logger). If you can't see why it failed, add a log before you
     add a fix.
@@ -262,11 +288,28 @@ read PROJECT_STATE + CURRENT_TASK + ROADMAP + phase file  ->  confirm the ONE IN
   ->  pass? record evidence in CHANGELOG, mark COMPLETE in ROADMAP + phase file
       fail? log defects, revise, repeat (bounded rounds)
   ->  push branch, open/reuse PR, review it (code-review, loops/pr-review-loop.md)
-      clean? pick next feature
+      clean? enqueue the lane for integration (loops/integration-loop.md), then claim next ready feature
       issues? fix (Maker), commit, push, review again (bounded rounds)
-  ->  update PROJECT_STATE + CURRENT_TASK + BLOCKERS  ->  stop cleanly
+  ->  update PROJECT_STATE + LANES + CURRENT_TASK + BLOCKERS  ->  stop cleanly
 ```
 The explicit version, with routing rules, is `graph/workflow-graph.md`.
+
+## Parallel lanes (opt-in — `MAX_LANES` in `LANES.md`; default 1)
+A **lane** is one build stream: a git worktree + a `lane/<FID>` branch + one active feature.
+`MAX_LANES=1` is the classic single-feature loop and the default; set it higher to run
+features concurrently. Two invariants make parallel safe:
+- **No missing / double-claimed feature.** A feature becomes `IN PROGRESS` only by a lane
+  **claiming** it — a one-line commit to `LANES.md` on `main`. Git is the mutex: if two lanes
+  race, the second push is rejected, it rebases, sees the feature taken, and claims another
+  from the ready set. Every `IN PROGRESS` feature has exactly one lane; every lane has exactly
+  one. Only features in the **ready set** (all deps `COMPLETE` **and merged to main**, phase
+  unlocked, no module overlap with an active lane — `rules/scope-guard.md`) are claimable.
+- **No lane breaks another.** Lanes never merge to `main` ad hoc. A clean PR puts the lane in
+  the **integration queue** (`loops/integration-loop.md`): the Integrator merges one lane at a
+  time — rebase on current `main`, resolve conflicts, re-run the FULL suite + e2e **on the
+  integrated main**, and only a green integrated main lets the next lane in. A per-lane green
+  PR is necessary but not sufficient; the cross-feature regression gate is at integrate.
+See `loops/parallel-loop.md` (spawn/claim/run) and `loops/integration-loop.md` (merge queue).
 
 ## Definition of done (per feature)
 - Every acceptance criterion in the phase file met.
@@ -280,23 +323,29 @@ The explicit version, with routing rules, is `graph/workflow-graph.md`.
   updated; committed on `feat/<FID>` (or `docs/<slug>`/`chore/<slug>` for harness-only work).
 - Branch pushed, PR opened/reused, reviewed clean, CI (incl. e2e) green, no unresolved
   findings (`loops/pr-review-loop.md`).
+- Merged to `main` through the integration queue with the FULL suite + e2e green **on the
+  integrated main** (`loops/integration-loop.md`), and the lane's claim released in `LANES.md`.
+  (With `MAX_LANES=1` the queue is trivial — the lane merges, then releases.)
 
 When the state is not nominal (dirty tree, red baseline, regression, flaky test, CI drift,
-merge conflict, committed secret, blocked feature), follow `loops/failure-modes.md` — each has
-a defined response.
+merge conflict, committed secret, blocked feature, a double-claimed or orphaned lane, an
+integration regression), follow `loops/failure-modes.md` — each has a defined response.
 
 ## Session-completion protocol (do all of this before you stop)
 1. Determine exactly what was implemented and run the appropriate tests.
 2. Update the feature status (phase file) and phase status.
-3. Update `ROADMAP.md` (checkbox + counts) and `CURRENT_TASK.md`.
-4. Update `PROJECT_STATE.md` (current phase/feature, progress, last verified, git commit).
+3. Update `ROADMAP.md` (checkbox + counts) and your lane's `CURRENT_TASK.md`.
+4. Update `PROJECT_STATE.md` (current phase/feature, progress, last verified, git commit) and
+   your lane's row in `LANES.md` (round, status, queue position).
 5. Add a `CHANGELOG.md` entry (feature ID + evidence).
 6. If the feature just went `COMPLETE`: push the branch, open (or reuse) its PR, review it,
-   and fix findings — repeat until clean before touching the next feature
-   (`loops/pr-review-loop.md`).
+   and fix findings until clean (`loops/pr-review-loop.md`); then **enqueue the lane for
+   integration** (`loops/integration-loop.md`). Only after it merges green on main do you
+   release the claim and let the lane take its next feature.
 7. Update `BLOCKERS.md` and `DECISIONS.md` if anything changed.
 8. Record git branch/commit (or `Working tree: DIRTY`) in `PROJECT_STATE.md`.
-9. Clearly set the next task in `CURRENT_TASK.md`.
+9. Clearly set the next task in `CURRENT_TASK.md`. If you are ending the lane (no next ready
+   feature), release its claim in `LANES.md` and leave the worktree clean for removal.
 
 ## Usage / session limits
 When you hit a usage or session limit, do not just stop: run the Session-completion
@@ -307,6 +356,8 @@ protocol above (commit + update the tracker), then fail over to the other runtim
 - A change would delete user data or break a public API contract.
 - Scope/acceptance is ambiguous and the files don't resolve it.
 - Maker-checker has failed the same feature for the max rounds (`loops/loop-state.md`).
+- An integration-queue merge keeps re-breaking `main` past `MAX_INTEGRATE_ROUNDS`, or two
+  lanes have a conflict neither can own without redesign (`loops/integration-loop.md`).
 
 ## Tech stack
 <<FILL: the locked stack for this project — languages, frameworks, datastore, package
@@ -322,25 +373,29 @@ Quick reference. `AGENTS.md` is the full contract; this is the checklist you run
 
 ## On session start (in order)
 1. Read `PROJECT_STATE.md` — the master file. Where we are.
-2. Read `CURRENT_TASK.md` — the one feature + its exact next step.
-3. Read `ROADMAP.md` — the feature list + statuses.
-4. Read the active phase file under `phases/` — acceptance criteria.
-5. Read `DECISIONS.md` + `BLOCKERS.md`.
-6. Run `init` (see `scripts/SCRIPTS.md`) to confirm a clean baseline.
-7. **Inspect the actual code.** Never trust the tracking files blindly — the codebase is
+2. Read `LANES.md` — the lanes, the claim ledger, the integration queue. Know which lane you
+   are (or that you are the single default lane, `MAX_LANES=1`).
+3. Read your lane's `CURRENT_TASK.md` — the one feature + its exact next step.
+4. Read `ROADMAP.md` — the feature list + statuses + deps + the parallel plan.
+5. Read the active phase file under `phases/` — acceptance criteria.
+6. Read `DECISIONS.md` + `BLOCKERS.md`.
+7. Run `init` (see `scripts/SCRIPTS.md`) to confirm a clean baseline.
+8. **Inspect the actual code.** Never trust the tracking files blindly — the codebase is
    the truth for what exists. If they disagree, correct the tracking files and note it in
    `CHANGELOG.md`.
 
 ## The one rule you break most often
-Work the ONE feature that is `IN PROGRESS`. Evidence before you move on. Don't "quickly
-also add" the next thing.
+Work the ONE feature your lane has `IN PROGRESS`. Evidence before you move on. Don't "quickly
+also add" the next thing, and never touch a feature another lane claimed in `LANES.md`.
 
 ## Where things live
 | I need to know... | Read |
 |---|---|
 | Where the project is right now | `PROJECT_STATE.md` (master) |
-| What to do next | `CURRENT_TASK.md` |
-| The whole feature list + status | `ROADMAP.md` |
+| Which lanes exist / what's claimed / the queue | `LANES.md` |
+| What to do next | my lane's `CURRENT_TASK.md` |
+| The whole feature list + status + deps + parallel plan | `ROADMAP.md` |
+| How lanes are spawned/claimed and merged | `loops/parallel-loop.md`, `loops/integration-loop.md` |
 | Acceptance for the current feature | the active `phases/PHASE-XX-*.md` |
 | What's been shipped | `CHANGELOG.md` |
 | What's decided (don't relitigate) | `DECISIONS.md` (+ `architecture/decisions/` ADRs) |
@@ -369,18 +424,21 @@ the Checker run. Keep this table current — it's the first thing the next agent
 | Verify baseline | `./scripts/init.sh` (install + build + typecheck + lint + full test + check-architecture + e2e smoke) |
 | Check boundaries | `<check-architecture>` (`scripts/check-architecture.sh`) |
 | Progress % | see `scripts/SCRIPTS.md` → progress-counter |
+| Lane (worktree) ops | `lane claim\|list\|release\|remove` (`scripts/SCRIPTS.md` → lane; parallel mode) |
+| Integrate queued lanes | `integrate` (`scripts/SCRIPTS.md` → integrate; parallel mode) |
 
 ## Current target
 <<FILL: the active phase + feature, e.g. "Phase 01 — Foundation. Feature F001." Details
 live in `CURRENT_TASK.md`.>>
 
 ## Before you stop
-Run the Session-completion protocol in `AGENTS.md`: update PROJECT_STATE, CURRENT_TASK,
-ROADMAP (+ phase file), CHANGELOG, BLOCKERS/DECISIONS as needed; leave the tree clean
-(`state/clean-state-checklist.md`); commit on `feat/<FID>` (or `docs/<slug>`/`chore/<slug>`
-for harness-only work). If the feature just went COMPLETE: push, open/reuse the PR, review
-it, fix findings, and repeat until clean before starting the next feature
-(`loops/pr-review-loop.md`).
+Run the Session-completion protocol in `AGENTS.md`: update PROJECT_STATE, LANES (your row),
+your lane's CURRENT_TASK, ROADMAP (+ phase file), CHANGELOG, BLOCKERS/DECISIONS as needed;
+leave the tree clean (`state/clean-state-checklist.md`); commit on `feat/<FID>` (or
+`docs/<slug>`/`chore/<slug>` for harness-only work). If the feature just went COMPLETE: push,
+open/reuse the PR, review it, fix findings until clean (`loops/pr-review-loop.md`), then
+enqueue the lane for integration (`loops/integration-loop.md`) — don't merge ad hoc. Start the
+lane's next feature only once the current one is queued/merged.
 END>>>
 
 FILE: .harness/loops/goal.md
@@ -399,8 +457,9 @@ DONE WHEN:   every acceptance item in the phase file for this feature is met
 VERIFY WITH: the FULL verify (CLAUDE.md → Commands: typecheck + lint + full test +
              check-architecture + e2e) + the feature's edge/error tests + its sprint-contract checks
 STOP AFTER:  15 turns  OR  90 minutes  OR  3 consecutive Evaluator REVISEs on the same defect
-CONSTRAINTS: obey scope-guard.md; one feature only; no new deps without contract justification;
-             never mark passed without evidence; never edit .harness rules to make a check pass;
+CONSTRAINTS: obey scope-guard.md; one feature only (this lane's claimed feature); no new deps
+             without contract justification; never mark passed without evidence; never edit
+             .harness rules to make a check pass; stay inside this lane's owned modules (LANES.md);
              on any abnormal state (dirty tree, red init, regression, flaky test) follow failure-modes.md
 ON STOP:     update ROADMAP.md + CHANGELOG.md + PROJECT_STATE.md, commit, report why it stopped
 ```
@@ -436,7 +495,9 @@ draws.
 
 ### Maker prompt (skeleton)
 ```
-You are the Maker. Implement ONLY the active feature in .harness/ROADMAP.md.
+You are the Maker. Implement ONLY this lane's claimed feature (your row in .harness/LANES.md;
+the single active one in .harness/ROADMAP.md when MAX_LANES=1). Stay inside the modules your
+lane owns — do not edit another lane's files.
 Read: AGENTS.md, the feature's sprint-contract.md, architecture docs, layer-boundaries.md,
 scope-guard.md. Build the thinnest step that advances the feature. Produce the evidence
 each acceptance item needs. Obey boundaries and scope. Do NOT grade your own work. Do NOT
@@ -497,10 +558,13 @@ after record (feature passed maker-checker):
   push branch to origin
   open a PR if none exists for this branch (reuse if one does — never open a second)
   review the PR (code-review; a Checker-style pass over the diff, not self-grading)
-    CLEAN  -> exit loop, proceed to next feature / handoff
+    CLEAN  -> enqueue this lane in LANES.md integration queue (loops/integration-loop.md)
     ISSUES -> fix (Maker) -> commit -> push (same branch/PR) -> review again
   if issues persist for MAX_PR_ROUNDS -> escalate to human with standing findings
 ```
+A clean PR does **not** merge here — it hands off to the integration queue, which merges lanes
+to `main` one at a time and re-runs the full suite on the integrated main (the cross-feature
+regression gate). With `MAX_LANES=1` the queue has one entry and this is immediate.
 
 ## Components
 
@@ -532,11 +596,12 @@ PR, never a force-push. Then review again.
   keep it separate from `MAX_ROUNDS` in `maker-checker-loop.md`).
 
 ## Gate
-The next feature does not start (`plan` for the next FID) until the current feature's PR is
-clean **and CI is green** (the full suite + e2e in CI, which is authoritative — see
-`loops/failure-modes.md` "local green, CI red"). This is `AGENTS.md` rule 2 ("one feature at a
-time") extended past the local check to the PR — a feature that passed maker-checker but has an
-open PR with unresolved findings or red CI is not done.
+A lane's next feature does not start until this feature's PR is clean **and CI is green** (the
+full suite + e2e in CI, which is authoritative — see `loops/failure-modes.md` "local green, CI
+red") **and the lane has been enqueued for integration**. This is `AGENTS.md` rule 2 ("one
+feature at a time, per lane") extended past the local check to the PR — a feature that passed
+maker-checker but has an open PR with unresolved findings, red CI, or an unmerged integration
+is not done. Other lanes keep running their own features in parallel meanwhile.
 
 ## Conflicts with the default branch
 If the branch falls behind and conflicts, rebase (or merge) the default branch in, re-run the
@@ -547,6 +612,142 @@ Maker-checker already proves correctness + evidence locally. Doing the PR after 
 means every PR opened describes a feature already proven, not a WIP diff — the PR review is
 one more independent pass (real CI checks, a fresh look at the diff), not a substitute for
 the local one.
+END>>>
+
+FILE: .harness/loops/parallel-loop.md
+<<<BEGIN
+# Parallel Loop — concurrent build lanes (opt-in)
+
+The single-feature loop (`maker-checker-loop.md`, `graph/workflow-graph.md`) is the default.
+This file is how you run several of those loops at once **without dropping or double-claiming a
+feature, and without lanes breaking each other**. It is off until you set `MAX_LANES > 1` in
+`LANES.md`; at `MAX_LANES=1` everything here collapses to the classic loop and you can ignore it.
+
+## What a lane is
+A **lane** = one git worktree + a `lane/<FID>` branch + exactly one claimed feature + its own
+`CURRENT_TASK.md` / `loop-state.md` / sprint contract on that branch. Lanes run the whole
+per-feature loop independently and concurrently (one runtime/agent each is typical). The only
+serialized step is integration (`integration-loop.md`).
+
+## The two invariants (this is the whole point)
+1. **No missing / double-claimed feature.** A feature goes `IN PROGRESS` only via a **claim**,
+   and a claim is a commit to `LANES.md` on `main`. Git is the mutex.
+2. **No lane breaks another.** Lanes own disjoint modules and never merge ad hoc; the Integrator
+   serializes merges and re-runs the full suite on the integrated `main`.
+
+## Coordinator (what picks work for lanes)
+```
+loop:
+  ready = lane ready            # deps merged to main + phase unlocked + unclaimed + module-disjoint
+  if free lane slot (active lanes < MAX_LANES) and ready non-empty:
+      pick a ready feature (respect phase order; prefer unblockers of the most dependents)
+      claim it (below); on success spawn a lane, on race retry with the next ready feature
+  else if no ready feature: wait for a lane to merge (which grows the ready set), then recompute
+  stop when every feature is COMPLETE and merged
+```
+The coordinator can be a human assigning lanes, a script, or the lead agent. It owns no code; it
+only claims and spawns.
+
+## Claim protocol (the git-mutex)
+```
+claim <FID>:
+  git fetch; git switch main; git pull --rebase
+  re-read LANES.md: is <FID> still in the ready set and unclaimed?  no -> abort, pick another
+  append the claim line to LANES.md (FID | lane/FID | owner | owned-modules | claimed-at)
+  set ROADMAP <FID> -> IN PROGRESS
+  commit ("chore(lanes): claim <FID>") and push
+    push rejected (someone claimed first) -> pull --rebase, re-check; <FID> taken -> pick another
+    push accepted -> the claim is yours
+  git worktree add ../wt-<FID> -b lane/<FID> main
+```
+Two lanes racing for the same feature cannot both win: one push lands, the other is rejected and
+backs off. No lock server, no out-of-band coordination — just `main`.
+
+## Running a lane
+Each lane runs `graph/workflow-graph.md` on its worktree: read-state -> plan (sprint contract,
+incl. §0 owned modules) -> implement -> verify -> evaluate -> record -> push -> PR review. Stay
+inside the lane's owned modules. On a clean, CI-green PR the lane **enqueues** for integration
+(`integration-loop.md`) instead of merging, then — once merged — releases its claim and either
+claims the next ready feature or ends (worktree removed).
+
+## Choosing what parallelizes
+- **Parallel**: features with no dependency between them and disjoint modules (the ready set).
+- **Sequential**: a dependency chain — `F003 deps: F001` waits until F001 is *merged*, not just
+  passed. Declared in `ROADMAP.md`; enforced by the ready set (`rules/scope-guard.md`).
+- **Serialize alone**: anything that must edit the shared/pure core. Give it the whole floor
+  (claim it when no other lane overlaps) rather than racing edits into the core.
+
+## Parameters (in `LANES.md`)
+- `MAX_LANES` — concurrent lanes (default 1 = off). Keep it <= the number of genuinely
+  independent ready features; more lanes than independent work just creates integration churn.
+- WIP = active lanes; never exceed `MAX_LANES`.
+
+## Bound it
+More lanes is not more throughput past the point where features stop being independent — every
+extra lane adds integration/rebase cost and conflict risk. Start at 2–3, raise only if the ready
+set is reliably that wide. Abnormal states (claim race, orphaned lane, cross-lane collision) are
+handled in `loops/failure-modes.md` → "Parallel lanes".
+END>>>
+
+FILE: .harness/loops/integration-loop.md
+<<<BEGIN
+# Integration Loop — the merge queue (opt-in)
+
+Parallel lanes each prove their own feature on their own branch. That is necessary but **not
+sufficient**: two independently-green branches can still break each other once combined. This
+loop is the cross-feature regression gate — it merges lanes to `main` **one at a time**, each
+with a full re-run on the integrated result, so `main` is never red. Off at `MAX_LANES=1` (a
+single clean lane just fast-forwards).
+
+## Why serialize merges
+If N lanes merged concurrently, each would test a `main` that none of the others had landed on
+yet — exactly the blind spot that lets feature A break feature B. Serializing means every merge
+is validated against the real, current `main` including all earlier-merged lanes. One rebase is
+ever in flight, so conflicts are pairwise and tractable.
+
+## The queue
+Lives in `LANES.md` → `## Integration queue`: an ordered list of lanes whose feature passed
+maker-checker and has a clean, CI-green PR. FIFO by default; a lane may be prioritized if it
+unblocks the most dependents. A lane enters on its clean PR (`pr-review-loop.md`) and leaves
+when merged green or bounced back to fix.
+
+## Cycle (the Integrator role, `verification/roles.md`)
+```
+while queue non-empty:
+  lane = head(queue)
+  git switch main; git pull --rebase
+  rebase lane/<FID> onto current main
+    conflict -> hand back to the lane to resolve on its branch (it owns its code), re-queue; continue
+  merge lane into a staging ref (or merge --no-ff into a temp integration branch)
+  run the FULL verify on the integrated result: typecheck + lint + FULL suite + check-architecture + e2e
+    GREEN -> merge to main (no force-push); mark <FID> COMPLETE in ROADMAP + phase file;
+             record evidence in CHANGELOG (incl. "integrated-main suite: green");
+             lane release <FID>; lane remove; pop the queue
+    RED   -> do NOT merge. integrateRound++. Hand the lane the failing output; it fixes on its
+             branch (Maker), re-passes its own PR, and re-queues. The break is a real
+             cross-feature defect, not a formality.
+  if integrateRound > MAX_INTEGRATE_ROUNDS for this lane -> escalate (AGENTS.md hard stop)
+```
+
+## Parameters
+- `MAX_INTEGRATE_ROUNDS = 3` — attempts to land one lane before escalating (separate from
+  `MAX_ROUNDS` and `MAX_PR_ROUNDS`).
+
+## Who does the fix
+The **integrating lane owns the fix**, on its own branch, rebased on current `main` — not the
+Integrator patching trunk, and never a merge that lands red "to be fixed later." The Integrator
+coordinates and verifies; it does not write feature code (same separation as Checker vs Maker).
+
+## Interaction with CI
+CI on `main` is the authoritative re-run (`loops/failure-modes.md` "local green, CI red"). The
+Integrator's local full-suite run gates the merge; CI on `main` confirms it. A post-merge red CI
+reverts the offending merge (never force-push) and re-queues the lane.
+
+## Definition of done, completed
+A feature is `COMPLETE` only after it lands green here and its claim is released. Passing
+maker-checker and a clean PR mean "ready to integrate," not "done" (`AGENTS.md` → Definition of
+done). With `MAX_LANES=1` the queue holds one lane and this is immediate, but the rule is the
+same: nothing is done until it is green on `main`.
 END>>>
 
 FILE: .harness/loops/timer-loop.md
@@ -565,7 +766,11 @@ EVERY 30 min (during active development):
   - do typecheck / lint / the FULL test suite pass on the current branch? (regression gate)
   - does the e2e smoke (critical user path) still pass?
   - does check-architecture pass (no new boundary violations)?
-  - is ROADMAP.md still well-formed with exactly one active feature?
+  - LANES invariants: each lane has <= 1 IN PROGRESS feature; no feature claimed by two lanes;
+    every IN PROGRESS feature has a live lane (no orphan); active lanes own non-overlapping
+    modules; the integration queue is advancing (no entry stuck past MAX_INTEGRATE_ROUNDS).
+    With MAX_LANES=1 this reduces to "exactly one active feature."
+  - does `main` (the integrated trunk) still pass the FULL suite + e2e smoke?
 
 DAILY:
   - dependency audit (known vulns) — report only
@@ -606,7 +811,9 @@ trigger.
 - check-architecture (no boundary violations)
 - FULL suite, not only the last feature's tests (regression gate)
 - e2e smoke: the critical user path(s) still pass end-to-end
-- exactly one IN PROGRESS feature; PROJECT_STATE not stale vs last commit
+- LANES invariants hold (one active feature per lane; no double-claim; no orphan lane;
+  non-overlapping ownership; queue advancing) — or just "exactly one active" when MAX_LANES=1
+- PROJECT_STATE not stale vs last commit
 ```
 END>>>
 
@@ -626,9 +833,10 @@ BLOCKERS) so a cold agent sees it happened.
   a `wip/<date>` branch and note it in `BLOCKERS.md`. Never discard without recording.
 - **`init` is red**: fixing it IS the first task — before any feature work. A red baseline
   invalidates every downstream check.
-- **More than one `IN PROGRESS` feature** (invariant violation): stop. Keep the one that
-  matches `PROJECT_STATE.md`; set the others to their true status; note the fix in
-  `CHANGELOG.md`. The single-active-feature invariant is load-bearing.
+- **More `IN PROGRESS` features than lanes** (invariant violation): each lane owns at most one.
+  With `MAX_LANES=1` there must be exactly one — keep the one matching `PROJECT_STATE.md`, set
+  the others to their true status. With parallel on, reconcile `ROADMAP.md` against `LANES.md`:
+  every `IN PROGRESS` feature must map to exactly one live lane. Note the fix in `CHANGELOG.md`.
 - **Tracking vs code disagree**: the codebase is truth for what EXISTS; correct the tracking
   files and note the discrepancy (`AGENTS.md`).
 - **Phase / dependency gate not met**: the active feature depends on an incomplete earlier
@@ -663,12 +871,38 @@ BLOCKERS) so a cold agent sees it happened.
 - **PR findings persist past `MAX_PR_ROUNDS`**: escalate with the standing findings; do not
   keep looping or silently merge.
 
+## Parallel lanes (only when `MAX_LANES > 1`)
+- **Claim race (two lanes grabbed the same feature)**: the claim is a commit to `LANES.md` on
+  `main`, so one lane's push wins and the other is rejected non-fast-forward. The loser does
+  `git pull --rebase`, sees the feature now claimed, drops it, and claims another from the
+  ready set. If both somehow recorded a claim, the earlier commit wins; the later lane aborts,
+  resets its worktree, and re-claims. Never two owners.
+- **Orphaned lane (a runtime died mid-feature)**: a lane in `LANES.md` with no commit on its
+  branch for a long gap and no live runtime. Inspect its branch: if there is salvageable work,
+  a new lane adopts the branch and continues; otherwise release the claim (feature back to the
+  ready set) and remove the worktree. Record it. An abandoned claim must never pin a feature.
+- **Cross-lane module collision**: a lane edited a file another active lane owns (ownership in
+  `LANES.md` / the sprint contract). Stop — this is how lanes break each other. Revert the
+  stray edit; if the feature genuinely needs that shared/core module, it is **not** parallel-
+  safe: serialize it (claim the core lock / run it alone) rather than editing across lanes.
+- **Integration regression (a lane greens its own PR but reds the integrated `main`)**: the
+  merge exposed a cross-feature conflict the per-lane suite couldn't see. The **integrating
+  lane owns the fix** on its branch (rebased on main), re-runs the full suite on the integrated
+  result, and only then does the merge land. It does not go in red. See `integration-loop.md`.
+- **Merge conflict at integrate**: the integrating lane rebases on current `main` and resolves,
+  re-running the full suite + e2e after. Lanes merge one at a time, so only one rebase is ever
+  in flight. Persisting past `MAX_INTEGRATE_ROUNDS` escalates (a hard stop in `AGENTS.md`).
+- **Dependency not yet merged**: a ready-set feature's dep is `COMPLETE` on a branch but not on
+  `main`. It is **not** ready — "done" means merged. Wait for the dep to clear the queue, or
+  pick another ready feature. Building on an unmerged dep is building on sand.
+
 ## Anytime
 - **BLOCKED**: record it in `BLOCKERS.md` (what would unblock it), set the feature status
-  BLOCKED, then either pick up an unblocked feature in the same phase or stop cleanly — never
-  fake progress around a blocker.
+  BLOCKED, then either pick up an unblocked/ready feature in the same phase or stop cleanly —
+  never fake progress around a blocker.
 - **Usage / session limit**: run the Session-completion protocol and fail over
-  (`RUNTIME-CONTINUITY.md`). Never stop mid-edit with a dirty tree.
+  (`RUNTIME-CONTINUITY.md`). Never stop mid-edit with a dirty tree. In parallel mode a limit
+  pauses that one lane; other lanes keep running.
 - **Scope temptation**: park it in `BLOCKERS.md` / `ROADMAP.md`; stay on the active feature.
 END>>>
 
@@ -680,7 +914,12 @@ Live state for the maker-checker loop. Overwrite the "Current" block each round;
 finished features to History. A cold agent reads this to know which round it is on. The
 active feature also lives in `../CURRENT_TASK.md`; keep them consistent.
 
+**Per lane.** This file is the state of ONE lane's loop. With `MAX_LANES=1` there is one, in
+the main tree. In parallel mode each worktree carries its own `loop-state.md` on its branch —
+`LANES.md` on `main` is the cross-lane index; this is the lane's own detail. Set `Lane` below.
+
 ## Parameters (current feature)
+- Lane: <<FILL: lane id/branch, e.g. lane/F001 — or "single" when MAX_LANES=1>>
 - Feature: <<FILL: first feature id, e.g. F001 — <name>>>
 - REQUIRED_PASSES: 2
 - MAX_ROUNDS: 6
@@ -735,7 +974,10 @@ flowchart TD
     OPENPR --> PRREVIEW{review PR}
     PRREVIEW -->|issues| PRFIX[fix - Maker]
     PRFIX --> PUSH
-    PRREVIEW -->|clean| NEXT{more features in slice?}
+    PRREVIEW -->|clean| ENQUEUE[enqueue lane for integration]
+    ENQUEUE --> INTEGRATE{integration queue - Integrator}
+    INTEGRATE -->|rebase on main, full suite green| NEXT{more ready features?}
+    INTEGRATE -->|integration regression / conflict| PRFIX
     NEXT -->|yes| PLAN
     NEXT -->|no| HANDOFF[update handoff + clean state]
     HANDOFF --> STOP([stop])
@@ -745,15 +987,49 @@ flowchart TD
     EVAL -->|max rounds hit / hard-stop| HUMAN[[escalate to human]]
     PLAN -->|scope ambiguous| HUMAN
     PRREVIEW -->|issues, max PR rounds hit| HUMAN
+    INTEGRATE -->|re-breaks past MAX_INTEGRATE_ROUNDS| HUMAN
     HUMAN --> STOP
 ```
+
+This is one lane's loop (and the whole picture when `MAX_LANES=1`). `read-state` now also loads
+`LANES.md`, and the first step of a fresh lane is **claim** (below). A clean PR no longer merges
+directly — it enqueues, and the Integrator merges lanes to `main` one at a time.
+
+## Parallel mode (`MAX_LANES > 1`)
+
+```mermaid
+flowchart TD
+    COORD([coordinator]) --> READY[compute ready set: deps merged + phase unlocked + no module overlap]
+    READY -->|ready feature + free lane slot| CLAIM[claim: commit to LANES.md on main]
+    CLAIM -->|push accepted| WT[create worktree lane/FID]
+    CLAIM -->|push rejected - race lost| READY
+    WT --> LANE[[lane loop: plan..pr-review - diagram above]]
+    LANE -->|clean PR| QUEUE[(integration queue in LANES.md)]
+    READY -->|no ready feature| WAIT[wait for a lane to merge, then recompute]
+
+    QUEUE --> INT[Integrator: take head]
+    INT --> REBASE[rebase lane on current main]
+    REBASE --> RUN[full suite + e2e on integrated main]
+    RUN -->|green| MERGE[merge to main, release claim, remove worktree]
+    RUN -->|red| FIXINT[integrating lane fixes on its branch]
+    FIXINT --> REBASE
+    MERGE --> READY
+    RUN -->|re-breaks past MAX_INTEGRATE_ROUNDS| HUMAN2[[escalate to human]]
+```
+
+The two gates that keep parallel safe map to two nodes: **claim** (the git-mutex that stops a
+feature being dropped or double-owned) and the **Integrator** serializing merges with a full
+re-run on the integrated `main` (the cross-feature regression gate). Lanes run the diagram
+above concurrently; only integration is serialized. Details: `loops/parallel-loop.md`,
+`loops/integration-loop.md`.
 
 ## Nodes
 | Node | Responsibility | Input | Output | Type |
 |---|---|---|---|---|
-| read-state | Load PROJECT_STATE, CURRENT_TASK, sprint contract; check start invariants | `.harness/*` | active feature + context | code (deterministic) |
-| repair | Reconcile an abnormal start state (`loops/failure-modes.md`) | dirty tree / red init / >1 active | clean, single-active baseline | agent |
-| plan | Fix "done": write/confirm sprint contract | active feature, docs | signed sprint-contract | agent (Planner) |
+| read-state | Load PROJECT_STATE, LANES, CURRENT_TASK, sprint contract; check start invariants | `.harness/*` | lane + active feature + context | code (deterministic) |
+| claim | Claim a ready feature by committing to `LANES.md` on `main`; create `lane/<FID>` worktree (parallel mode) | ready set, free slot | owned feature + worktree | code (deterministic, git-mutex) |
+| repair | Reconcile an abnormal start state (`loops/failure-modes.md`) | dirty tree / red init / bad lane invariants | clean, one-active-per-lane baseline | agent |
+| plan | Fix "done": write/confirm sprint contract (incl. lane ownership) | active feature, docs | signed sprint-contract | agent (Planner) |
 | implement | Build the thinnest step, produce evidence | sprint contract | code + evidence | agent (Maker) |
 | verify | Run typecheck, lint, FULL suite (regression gate), check-architecture, e2e; capture output | code | check results | code (deterministic) |
 | evaluate | Score against rubric, re-run checks | code + evidence + results | score + verdict | agent (Checker) |
@@ -761,7 +1037,9 @@ flowchart TD
 | push | Push branch to origin | committed evidence | branch on remote | code (deterministic) |
 | open-pr | Open PR if none exists, else reuse | branch on remote | PR number/url | code (deterministic) |
 | pr-review | Review the PR diff (code-review) | PR | findings or clean | agent (Checker) |
-| pr-fix | Address PR findings | findings | code + evidence | agent (Maker) |
+| pr-fix | Address PR findings (and integration regressions) | findings | code + evidence | agent (Maker) |
+| enqueue | Add the lane to the `LANES.md` integration queue on a clean PR | clean PR | lane queued | code (deterministic) |
+| integrate | Merge queued lanes to `main` one at a time: rebase, full suite + e2e on integrated main, merge, release claim | queue | updated `main` | agent (Integrator) + code |
 | rollback | Revert to last clean commit on hard violation | dirty tree | clean tree | code (deterministic) |
 | handoff | Rewrite PROJECT_STATE, run clean-state checklist | slice complete | clean, documented repo | agent |
 | escalate | Stop and write a human-readable alert | blocker | alert in PROJECT_STATE | agent |
@@ -769,9 +1047,12 @@ flowchart TD
 ## Edges
 | From | To | Type | Condition |
 |---|---|---|---|
-| read-state | plan | standard | start state nominal |
-| read-state | repair | conditional | dirty tree, red init, or >1 IN PROGRESS |
-| repair | plan | standard | baseline clean + single active feature |
+| read-state | claim | conditional | parallel mode, lane has no feature yet, ready set non-empty |
+| claim | plan | standard | claim committed to main (push accepted) + worktree ready |
+| claim | claim | loop | push rejected (race lost) — rebase, pick another ready feature |
+| read-state | plan | standard | start state nominal, lane already owns a feature |
+| read-state | repair | conditional | dirty tree, red init, or lane invariants violated |
+| repair | plan | standard | baseline clean + one active feature per lane |
 | plan | implement | standard | contract signed |
 | plan | escalate | conditional | scope/acceptance ambiguous |
 | implement | verify | standard | step complete |
@@ -787,16 +1068,23 @@ flowchart TD
 | open-pr | pr-review | standard | always |
 | pr-review | pr-fix | conditional | findings present, prRound < MAX_PR_ROUNDS |
 | pr-fix | push | standard | fixes committed (loop) |
-| pr-review | plan | conditional | clean and more features remain in slice |
-| pr-review | handoff | conditional | clean and slice complete |
+| pr-review | enqueue | conditional | clean + CI green |
 | pr-review | escalate | conditional | findings present and prRound >= MAX_PR_ROUNDS (checked before pr-fix; a clean review never escalates) |
+| enqueue | integrate | standard | always (immediate when MAX_LANES=1) |
+| integrate | pr-fix | rollback | integration regression or merge conflict, integrateRound < MAX_INTEGRATE_ROUNDS |
+| integrate | plan | conditional | merged green to main, release claim, and a ready feature remains |
+| integrate | handoff | conditional | merged green to main and no ready feature remains |
+| integrate | escalate | conditional | re-breaks main past MAX_INTEGRATE_ROUNDS |
 | handoff | stop | standard | always |
 | escalate | stop | standard | always |
 
 ## Shared state (every node reads/writes this)
 ```
-activeFeatureId        # from ROADMAP.md
-startState             # nominal | dirty-tree | red-init | multi-active (routes to repair)
+laneId                 # this lane (branch/worktree); "single" when MAX_LANES=1
+readySet               # claimable features: deps merged + phase unlocked + no module overlap
+activeFeatureId        # the feature this lane claimed (from LANES.md / ROADMAP.md)
+ownedModules           # paths/modules this lane may touch (no overlap with other active lanes)
+startState             # nominal | dirty-tree | red-init | lane-invariant-violation (routes to repair)
 sprintContract         # the signed contract for the active feature
 codeChanges            # what the Maker produced this round
 verifyResults          # typecheck/lint/FULL-test/check-architecture/e2e output
@@ -810,16 +1098,23 @@ standingDefects        # open defects from the Checker
 prRound                # current PR review round; guarded by MAX_PR_ROUNDS
 prFindings             # open findings from the last PR review
 prVerdict              # CLEAN | ISSUES
+integrationQueue       # ordered lanes awaiting merge to main (LANES.md)
+integrateRound         # current integration round for the head lane; guarded by MAX_INTEGRATE_ROUNDS
+integratedMainVerdict  # GREEN | RED (full suite + e2e on main after rebase+merge)
 ```
-Concrete values live across `ROADMAP.md`, `verification/sprint-contract.md`, and
-`loops/loop-state.md` (round, consecutivePasses, standingDefects). The graph does not add a
-new store. `prRound`/`prFindings`/`prVerdict` live as prose in each round's
+Concrete values live across `ROADMAP.md`, `LANES.md` (laneId, readySet, ownedModules,
+integrationQueue, integrateRound), `verification/sprint-contract.md`, and
+`loops/loop-state.md` (round, consecutivePasses, standingDefects — per lane). The graph does
+not add a new store. `prRound`/`prFindings`/`prVerdict` live as prose in each round's
 `## PR Review — round N` section of `.harness/reviews/<FID>-review.md`; move them into
 `loop-state.md` if a cold agent ever needs to resume mid-PR-round.
 
 ## Routing rules (plain if-then, the execution logic)
 ```
-if read-state finds dirty tree/red init/>1 active -> repair (failure-modes) -> plan
+if parallel and lane unclaimed and readySet non-empty -> claim (commit to main)
+if claim push rejected (race)             -> rebase, recompute readySet, claim again
+if claim accepted                         -> create worktree -> plan
+if read-state finds dirty tree/red init/bad lane invariants -> repair (failure-modes) -> plan
 if verify detects boundary violation      -> rollback
 if verify finds a regression or e2e/edge failure -> implement (fix, round++)
 if verify passed                          -> evaluate
@@ -829,8 +1124,10 @@ if evaluate == PASS and passes >= required -> record
 if record                                 -> push -> open-pr -> pr-review
 if pr-review has findings and prRound >= MAX_PR_ROUNDS -> escalate (checked first)
 if pr-review finds findings               -> pr-fix -> push (prRound++)
-if pr-review clean and more features left -> plan (next feature)
-if pr-review clean and slice complete     -> handoff
+if pr-review clean                        -> enqueue -> integrate
+if integrate rebase+merge greens main     -> release claim; readySet left? plan : handoff
+if integrate reds main or conflicts, integrateRound < MAX_INTEGRATE_ROUNDS -> pr-fix (round++)
+if integrate re-breaks past MAX_INTEGRATE_ROUNDS -> escalate
 if round >= MAX_ROUNDS or hard-stop       -> escalate
 if plan finds scope ambiguous             -> escalate
 ```
@@ -847,18 +1144,20 @@ FILE: .harness/graph/graph.json
 <<<BEGIN
 {
   "name": "build-loop",
-  "description": "Maker-checker build loop. Machine-readable twin of workflow-graph.md.",
-  "version": "1.0.0",
+  "description": "Maker-checker build loop with opt-in parallel lanes + integration queue. Machine-readable twin of workflow-graph.md.",
+  "version": "2.0.0",
   "entry": "read-state",
   "state": [
-    "activeFeatureId", "startState", "sprintContract", "codeChanges", "verifyResults",
-    "regressionDetected", "e2eVerdict",
+    "laneId", "readySet", "activeFeatureId", "ownedModules", "startState", "sprintContract",
+    "codeChanges", "verifyResults", "regressionDetected", "e2eVerdict",
     "evaluatorVerdict", "evaluatorScore", "consecutivePasses", "round", "standingDefects",
-    "prRound", "prFindings", "prVerdict"
+    "prRound", "prFindings", "prVerdict",
+    "integrationQueue", "integrateRound", "integratedMainVerdict"
   ],
-  "params": { "REQUIRED_PASSES": 2, "MAX_ROUNDS": 6, "MAX_PR_ROUNDS": 4 },
+  "params": { "MAX_LANES": 1, "REQUIRED_PASSES": 2, "MAX_ROUNDS": 6, "MAX_PR_ROUNDS": 4, "MAX_INTEGRATE_ROUNDS": 3 },
   "nodes": [
-    { "id": "read-state", "type": "code",  "does": "load PROJECT_STATE, CURRENT_TASK, sprint contract; check start invariants" },
+    { "id": "read-state", "type": "code",  "does": "load PROJECT_STATE, LANES, CURRENT_TASK, sprint contract; check start + lane invariants" },
+    { "id": "claim",      "type": "code",  "does": "claim a ready feature by commit to LANES.md on main (git-mutex); create lane/<FID> worktree" },
     { "id": "repair",     "type": "agent", "does": "reconcile abnormal start state (failure-modes.md)" },
     { "id": "plan",       "type": "agent", "role": "Planner",   "does": "write/confirm sprint contract" },
     { "id": "implement",  "type": "agent", "role": "Maker",     "does": "build thinnest step + evidence" },
@@ -868,16 +1167,21 @@ FILE: .harness/graph/graph.json
     { "id": "push",       "type": "code",  "does": "push branch to origin" },
     { "id": "open-pr",    "type": "code",  "does": "open PR if none exists, else reuse" },
     { "id": "pr-review",  "type": "agent", "role": "Checker",   "does": "review PR diff (code-review)" },
-    { "id": "pr-fix",     "type": "agent", "role": "Maker",     "does": "address PR findings, commit" },
+    { "id": "pr-fix",     "type": "agent", "role": "Maker",     "does": "address PR findings and integration regressions, commit" },
+    { "id": "enqueue",    "type": "code",  "does": "add the lane to the LANES.md integration queue on a clean PR" },
+    { "id": "integrate",  "type": "agent", "role": "Integrator", "does": "merge queued lanes to main one at a time: rebase, full suite + e2e on integrated main, merge, release claim" },
     { "id": "rollback",   "type": "code",  "does": "revert to last clean commit" },
     { "id": "handoff",    "type": "agent", "does": "rewrite handoff, run clean-state checklist" },
     { "id": "escalate",   "type": "human", "does": "stop and alert a human" },
     { "id": "stop",       "type": "terminal" }
   ],
   "edges": [
-    { "from": "read-state", "to": "plan",      "when": "start_state_nominal" },
-    { "from": "read-state", "to": "repair",    "when": "dirty_tree_or_red_init_or_multi_active" },
-    { "from": "repair",     "to": "plan",      "when": "baseline_clean_single_active" },
+    { "from": "read-state", "to": "claim",     "when": "parallel_and_lane_unclaimed_and_ready_set_nonempty" },
+    { "from": "claim",      "to": "claim",     "when": "push_rejected_race_lost", "kind": "loop", "note": "rebase, recompute ready set, claim another" },
+    { "from": "claim",      "to": "plan",      "when": "claim_committed_and_worktree_ready" },
+    { "from": "read-state", "to": "plan",      "when": "start_state_nominal_and_lane_owns_feature" },
+    { "from": "read-state", "to": "repair",    "when": "dirty_tree_or_red_init_or_lane_invariant_violation" },
+    { "from": "repair",     "to": "plan",      "when": "baseline_clean_one_active_per_lane" },
     { "from": "plan",       "to": "implement", "when": "contract_signed" },
     { "from": "plan",       "to": "escalate",  "when": "scope_ambiguous" },
     { "from": "implement",  "to": "verify",    "when": "step_complete" },
@@ -894,8 +1198,12 @@ FILE: .harness/graph/graph.json
     { "from": "pr-review",  "to": "escalate",  "when": "findings_present_and_max_pr_rounds", "priority": 1, "note": "checked before pr-fix; a clean review never escalates" },
     { "from": "pr-review",  "to": "pr-fix",    "when": "findings_present_and_below_max_pr_rounds", "kind": "rollback" },
     { "from": "pr-fix",     "to": "push",      "when": "fixes_committed", "kind": "rollback" },
-    { "from": "pr-review",  "to": "plan",      "when": "clean_and_more_features_in_slice" },
-    { "from": "pr-review",  "to": "handoff",   "when": "clean_and_slice_complete" },
+    { "from": "pr-review",  "to": "enqueue",   "when": "clean_and_ci_green" },
+    { "from": "enqueue",    "to": "integrate", "when": "always", "note": "immediate when MAX_LANES=1" },
+    { "from": "integrate",  "to": "pr-fix",    "when": "integration_regression_or_conflict_below_max_integrate_rounds", "kind": "rollback" },
+    { "from": "integrate",  "to": "plan",      "when": "merged_green_and_ready_feature_remains" },
+    { "from": "integrate",  "to": "handoff",   "when": "merged_green_and_no_ready_feature" },
+    { "from": "integrate",  "to": "escalate",  "when": "re_breaks_main_past_max_integrate_rounds", "priority": 1 },
     { "from": "handoff",    "to": "stop",      "when": "always" },
     { "from": "escalate",   "to": "stop",      "when": "always" }
   ]
@@ -938,6 +1246,19 @@ You play these roles in sequence, switching context deliberately. Announce the s
   boundary violation. The Evaluator may not fix code; it reports. A vague "looks good" is a
   failed evaluation.
 
+## Integrator (parallel mode only — `MAX_LANES > 1`)
+- Input: the integration queue in `LANES.md` — lanes whose feature passed maker-checker and
+  has a clean, CI-green PR.
+- Output: each queued lane merged to `main` one at a time, with the FULL suite + e2e re-run
+  **on the integrated main** as the proof, and the lane's claim released.
+- Discipline: serialize. Take the head of the queue, rebase it on current `main`, resolve
+  conflicts, re-run the whole verify on the merged result — and only land it if green. A
+  per-lane green PR is not trusted as proof the integrated trunk is green; that is the
+  cross-feature regression the Integrator exists to catch. On red, the integrating lane fixes
+  on its branch and re-queues; the Integrator never lands a red merge and never force-pushes
+  `main`. With `MAX_LANES=1` this role collapses into a trivial fast-forward and needs no
+  separate pass. See `loops/integration-loop.md`.
+
 ## Handoff rules
 - Generator -> Evaluator handoff must include: what was built, the exact commands to
   reproduce evidence, and any deviation from the contract.
@@ -945,6 +1266,10 @@ You play these roles in sequence, switching context deliberately. Announce the s
   acceptance item or rubric line, and the failing evidence.
 - A feature is `passed` only after an Evaluator PASS with score >= threshold. The Generator
   cannot set `passed` on its own say-so.
+- Lane -> Integrator handoff (parallel mode) must include: the clean-PR link, CI-green
+  evidence, and the lane's owned-modules list so the Integrator can anticipate conflicts.
+- A feature is `COMPLETE` only after the Integrator lands it green on `main` and releases the
+  claim — passing maker-checker + PR is "ready to integrate," not "done."
 
 ## When roles run as one agent vs. separate agents
 - Same session, sequential: acceptable for most features. Switch context explicitly; re-run
@@ -1164,10 +1489,20 @@ FILE: .harness/verification/sprint-contract.md
 
 Feature: <FID> — <name>
 Phase: <phase number + name>
+Lane: <lane/FID branch, or "single" when MAX_LANES=1>
+Depends on: <FIDs that must be COMPLETE **and merged to main** first, or "none">
 Date: <YYYY-MM-DD>
 
 > The Planner fills this before the Maker builds. Copy this template per feature. Nothing is
 > built until the contract exists and its acceptance maps to concrete checks.
+
+## 0. Lane ownership & parallel-safety (parallel mode)
+- Owned modules/paths (this lane may edit ONLY these): <list — must not overlap any other
+  active lane's owned set in `LANES.md`>
+- Shared/core touched: <none — or name it. Touching the shared core means this feature is NOT
+  parallel-safe: serialize it (run it alone / take the core lock), don't run it beside others.>
+- Deps merged to main? <yes — or list the unmerged deps that block claiming this now>
+- (With `MAX_LANES=1` this section is "single lane — N/A".)
 
 ## 1. Scope & Acceptance Criteria
 - [ ] <acceptance item 1> — <the exact check/evidence that proves it>
@@ -1244,8 +1579,29 @@ Colocate unit/integration tests with code. No file over ~400 lines without a rea
   on main.
 - Never commit secrets, `.env`, or generated artifacts.
 - After a feature passes maker-checker: push the branch, open a PR (reuse if one is already
-  open for it — never open a second), review it, fix findings, and repeat until clean before
-  starting the next feature. See `loops/pr-review-loop.md`.
+  open for it — never open a second), review it, fix findings until clean, then enqueue for
+  integration before the lane's next feature. See `loops/pr-review-loop.md` +
+  `loops/integration-loop.md`.
+
+## Lanes & worktrees (parallel mode — `MAX_LANES > 1`)
+- One lane per feature: a git worktree on a `lane/<FID>` branch (the `feat/<FID>` work happens
+  on that branch; `lane/<FID>` and `feat/<FID>` may be the same branch — keep one name per
+  feature). `git worktree add ../wt-<FID> -b lane/<FID> main`; remove with
+  `git worktree remove` once the feature is merged and the claim released.
+- **Claim protocol (the git-mutex that prevents a dropped or double-claimed feature):** to
+  start a feature, add its claim line to `LANES.md` **on `main`** and push. If the push is
+  rejected (someone else claimed first), `git pull --rebase`, re-read `LANES.md`, and claim a
+  different ready feature — never override another lane's claim. The accepted push is the
+  claim; only then create the worktree and build.
+- **Shared-state files are owned by `main`:** `LANES.md` (claims + queue) and `ROADMAP.md`
+  statuses are coordination state every lane must read consistently, so they are read/written
+  on `main` via short claim/release/enqueue commits, not edited independently on lane branches.
+  Per-lane working files (`CURRENT_TASK.md`, `loops/loop-state.md`, the feature's
+  `sprint-contract.md`, `evidence/`) live on the lane branch.
+- **Release** the claim (remove the lane's line / mark the feature merged) on `main` only after
+  the Integrator lands the feature green. A lane that stops without merging leaves its claim so
+  no one else grabs the half-done feature — unless it is declared orphaned (`failure-modes.md`).
+- Never force-push `main` or a shared lane branch.
 
 ## Evidence discipline
 A feature is `passed` only with recorded evidence in `CHANGELOG.md`: the exact command, its
@@ -1264,7 +1620,8 @@ error with cause. See `scripts/SCRIPTS.md` → logger contract.
 4. Run `state/clean-state-checklist.md`. Leave the tree clean.
 5. Commit with the feature id.
 6. If the feature (or harness-only change) just went complete: push, open/reuse the PR,
-   review it, and fix findings until clean (`loops/pr-review-loop.md`).
+   review it, fix findings until clean (`loops/pr-review-loop.md`), then enqueue the lane for
+   integration (`loops/integration-loop.md`); release the claim once merged.
 
 ## Comments & docs
 Comment *why*, not *what*. Update the affected `.harness` doc in the same change that makes
@@ -1306,9 +1663,28 @@ temptation and parks it. Keep this list in sync with ROADMAP.md.>>
 5. Don't skip a phase's completion criteria. A phase is done only when every feature is
    `COMPLETE` with evidence and the phase smoke test is green.
 
+## The ready set (which features a lane may claim now)
+A lane claims only from the **ready set**. A feature is ready iff ALL hold:
+1. **Phase unlocked** — it is in the active phase (earlier phases all COMPLETE). Phase gating
+   is unchanged by parallel mode; lanes parallelize *within* the phase's ready features.
+2. **Deps merged** — every `Depends on:` feature (ROADMAP) is `COMPLETE` **and merged to
+   `main`**, not merely passed on a branch. A dep on a branch is not ready (`failure-modes.md`
+   "dependency not yet merged"). This is the sequential constraint: dependent features cannot
+   run beside the features they depend on; they wait for the merge.
+3. **Unclaimed** — no lane already owns it in `LANES.md`.
+4. **Module-disjoint** — its owned modules (sprint contract §0) do not overlap any active
+   lane's owned set. Two lanes editing the same module would break each other, so they are not
+   parallel-safe; serialize them. A feature that must touch the shared core takes the core lock
+   and runs alone.
+Features with no dependency between them and disjoint modules are the ones that run in
+parallel. Dependency chains (`F002` needs `F001`) run sequentially — `F002` only becomes ready
+once `F001` is merged. Keep the dependency edges + the parallel groups explicit in
+`ROADMAP.md` so the ready set is mechanical, not a judgment call.
+
 ## Why so strict
 A solid, tested foundation beats half of every phase started. Early substrate multiplies its
-shakiness across everything built on top of it.
+shakiness across everything built on top of it. Parallelism never relaxes phase gating or the
+dependency order — it only lets *independent* ready features proceed at once.
 END>>>
 
 FILE: .harness/rules/layer-boundaries.md
@@ -1386,8 +1762,10 @@ files.
 - **Inputs**: none (reads repo state).
 - **Behavior**: check the working tree is clean (warn on a dirty tree — see
   `loops/failure-modes.md`); install deps if needed; run typecheck, lint, the FULL test suite,
-  `check-architecture`, and the e2e smoke; confirm `ROADMAP.md` is well-formed with exactly
-  one `IN PROGRESS` feature; print the active feature + next step from the handoff.
+  `check-architecture`, and the e2e smoke; confirm the LANES invariants hold (each lane has at
+  most one `IN PROGRESS` feature, every `IN PROGRESS` feature maps to exactly one live lane, no
+  double-claim — or, with `MAX_LANES=1`, exactly one `IN PROGRESS` feature); print this lane's
+  active feature + next step from the handoff.
 - **Output**: a short readiness summary.
 - **Exit**: `0` if the baseline is clean and buildable; non-zero listing exactly what is not.
 - **Used by**: every session start; the goal loop; the timer loop.
@@ -1471,6 +1849,44 @@ files.
 - **Used by**: session-completion protocol; the timer loop.
 - **Note**: until implemented, maintain the counts by hand on every status change.
 
+## lane (parallel mode — `MAX_LANES > 1`)
+- **Purpose**: manage build lanes (git worktrees) and the claim ledger in `LANES.md`.
+  Implements the claim git-mutex so no feature is dropped or double-claimed
+  (`loops/parallel-loop.md`).
+- **Subcommands**:
+  - `lane ready` — print the ready set (deps merged to main + phase unlocked + unclaimed +
+    module-disjoint from active lanes), derived from `ROADMAP.md` + `LANES.md`.
+  - `lane claim <FID>` — append the claim line to `LANES.md` **on `main`**, commit, and push.
+    On a rejected push (race lost), pull --rebase, re-check, and exit non-zero so the caller
+    picks another ready feature. On success, create the worktree `lane/<FID>` and print its path.
+  - `lane list` — the live lanes: FID, branch, worktree path, status, owned modules, queue pos.
+  - `lane release <FID>` — remove the feature's claim line on `main` (after it merged) and
+    print the worktree to remove.
+  - `lane remove <FID>` — `git worktree remove` for a merged/abandoned lane.
+- **Behavior**: never overrides an existing claim; refuses to claim a feature not in the ready
+  set; treats `LANES.md` on `main` as the single source of truth and always rebases before a
+  claim/release commit.
+- **Exit**: `0` on success; non-zero (with reason) on a lost race, a non-ready feature, or an
+  overlap conflict.
+- **Used by**: the parallel loop; the coordinator; the claim node in the graph.
+- **No-op when `MAX_LANES=1`**: `claim`/`release` are trivial (the single lane is the main
+  tree); `ready` still reports the next feature.
+
+## integrate (parallel mode — `MAX_LANES > 1`)
+- **Purpose**: the merge queue — land queued lanes on `main` one at a time with a full re-run,
+  the cross-feature regression gate (`loops/integration-loop.md`).
+- **Inputs**: the integration queue in `LANES.md`.
+- **Behavior**: take the head lane; rebase its branch on current `main`; on conflict, hand back
+  to the lane to resolve (don't resolve blindly). Merge to a staging ref, run the FULL suite +
+  e2e **on the integrated result**. Green → fast-forward/merge `main`, mark the feature
+  `COMPLETE`, `lane release` it, advance the queue. Red → do not merge; hand the lane back to
+  fix on its branch (`integrateRound++`); past `MAX_INTEGRATE_ROUNDS` exit non-zero to escalate.
+  One lane in flight at a time; never force-push `main`.
+- **Output**: per-lane merged/blocked status + the integrated-main verify result.
+- **Exit**: `0` when the queue drains green; non-zero naming the lane that blocked and why.
+- **Used by**: the Integrator role; the integrate node in the graph; CI on `main`.
+- **No-op when `MAX_LANES=1`**: a single clean lane fast-forwards; there is no queue to serialize.
+
 ---
 
 ## (optional) scheduler / agent-relay
@@ -1491,7 +1907,8 @@ when `rules/layer-boundaries.md` is filled (architecture comes after the require
 not before it has a flow to drive. `logger` lands with the first
 API/worker code. `benchmark` and `cleanup-scanner` are useful once there is enough code to
 measure — implement them by the end of the first phase, not before an active feature needs
-them (scope-guard).
+them (scope-guard). `lane` and `integrate` are implemented only when you turn parallel mode on
+(`MAX_LANES > 1` in `LANES.md`); until then the single-lane loop needs neither.
 END>>>
 
 FILE: .harness/state/clean-state-checklist.md
@@ -1504,8 +1921,11 @@ how the next session loses hours. Tick every box.
 ## Before starting work
 - [ ] `git status` is clean, or the only changes are ones you understand from the handoff.
 - [ ] `init` runs green (build + boundary check). If not, fixing it IS your first task.
-- [ ] `ROADMAP.md` has exactly one `IN PROGRESS` feature and it matches `PROJECT_STATE.md`.
-- [ ] You have read the sprint contract for the active feature.
+- [ ] LANES invariants hold: your lane owns exactly one `IN PROGRESS` feature, it matches your
+      `CURRENT_TASK.md`, and no other lane claims it (`LANES.md`). With `MAX_LANES=1`: exactly
+      one `IN PROGRESS` feature, matching `PROJECT_STATE.md`.
+- [ ] Your lane's claimed feature is in the ready set (deps merged to main, phase unlocked).
+- [ ] You have read the sprint contract for the active feature (incl. its owned-modules list).
 
 ## Before stopping work
 - [ ] Code compiles: typecheck passes.
@@ -1519,18 +1939,24 @@ how the next session loses hours. Tick every box.
 - [ ] `ROADMAP.md` status + evidence updated.
 - [ ] `PROJECT_STATE.md` rewritten for a cold reader (active feature + next steps + blockers).
 - [ ] No stray files, no secrets, no `.env`, no debug logging left on.
-- [ ] Committed on a `feat/<feature-id>` branch (or `docs/<slug>`/`chore/<slug>` for
-      harness-only work) with a conventional message.
-- [ ] Exactly one `IN PROGRESS` feature remains (or all passed and phase advanced).
-- [ ] If the feature just went `COMPLETE`: branch pushed, PR opened/reused, reviewed clean —
-      no unresolved findings (`loops/pr-review-loop.md`).
+- [ ] Committed on a `feat/<feature-id>` / `lane/<FID>` branch (or `docs/<slug>`/`chore/<slug>`
+      for harness-only work) with a conventional message.
+- [ ] Your lane still owns exactly one `IN PROGRESS` feature (or it merged and the claim was
+      released). No edits landed in another lane's owned modules.
+- [ ] If the feature's PR just went clean: lane enqueued for integration (`LANES.md`), not
+      merged ad hoc. If it merged: claim released, worktree clean for removal.
+- [ ] If the feature just went `COMPLETE`: landed green on `main` via the integration queue
+      (`loops/integration-loop.md`) with the full suite + e2e green on the integrated main.
 
 ## Red flags that mean "not clean"
 - Tests skipped or commented out to make the suite pass.
 - Only a subset of tests run "to save time" — a regression can hide in the rest.
 - An e2e test mocked across the boundary it claims to prove, or quarantined because it's flaky.
 - A feature marked `passed` with `evidence: null`.
-- More than one `IN PROGRESS` feature.
+- A lane owning more than one `IN PROGRESS` feature, a feature with two owners, or an
+  `IN PROGRESS` feature no live lane owns (orphan).
+- A clean PR merged straight to `main` bypassing the integration queue.
+- An edit to a module another active lane owns.
 - Uncommitted changes with no handoff note.
 - A TODO that silently expands scope (move it to the parking lot instead).
 END>>>
@@ -1576,12 +2002,21 @@ The active runtime reaches its usage/session limit (a rate-limit or max-session 
 > `.harness/AGENTS.md`. Work only the one active feature. Do NOT restart from Phase 1.
 
 ## Guardrails
-- One active feature at a time (whatever `CURRENT_TASK.md` says). A switch changes *who*
-  works, never *what* is worked on.
+- One active feature at a time per lane (whatever that lane's `CURRENT_TASK.md` says). A
+  failover changes *who* works a lane, never *what* that lane works on.
 - Commit before switching; the receiving runtime trusts committed code over stale tracking
   and reconciles per `AGENTS.md`.
 - If a limit hits mid-feature, `CURRENT_TASK.md` must record the exact next step so the other
   runtime continues rather than restarts.
+
+## Failover vs. parallel (don't confuse them)
+Failover and parallel lanes are orthogonal. **Failover** swaps the runtime driving a lane when
+it hits a limit — same feature, different tool. **Parallel** (`loops/parallel-loop.md`) runs
+*different* features in *different* lanes at once. You can combine them: assign a runtime per
+lane, and fail a single lane over to a backup runtime while the others keep going. A limit
+pauses one lane, never the whole project. When a runtime dies mid-lane and no backup picks it
+up, the lane is **orphaned** — recover it per `loops/failure-modes.md` (adopt the branch or
+release the claim); never let an abandoned claim pin a feature.
 
 ## Platform note
 If more than one machine/VM touches the repo, native build artifacts (installed dependencies)
@@ -1622,8 +2057,15 @@ FILE: .harness/PROJECT_STATE.md
 
 ## Where we are
 - **Phase**: <<FILL: e.g. Phase 01 — Foundation>>
-- **Active feature**: <<FILL: e.g. F001 — <name> (IN PROGRESS)>>
+- **Active feature(s)**: <<FILL: e.g. F001 — <name> (IN PROGRESS). One per lane.>>
 - **Overall progress**: 0 / <<FILL: total>> features COMPLETE (0%)
+- **Parallel mode**: `MAX_LANES=1` (off) — see `LANES.md`. The lane dashboard below mirrors it.
+
+## Lanes (dashboard — authoritative detail in `LANES.md`)
+| Lane | Feature | Status | Owned modules | Runtime | Queue |
+|---|---|---|---|---|---|
+| single | <<FILL: F001>> | IN PROGRESS | — | <<FILL>> | — |
+<!-- one row per active lane when MAX_LANES>1; integration queue order in the Queue column -->
 
 ## Last verified
 - **Date**: <YYYY-MM-DD>
@@ -1646,8 +2088,13 @@ FILE: .harness/CURRENT_TASK.md
 <<<BEGIN
 # CURRENT TASK
 
+> Per lane. With `MAX_LANES=1` this is the single task in the main tree; in parallel mode each
+> worktree carries its own `CURRENT_TASK.md` on its branch. `LANES.md` indexes all lanes.
+
+**Lane**: <<FILL: lane/FID — or "single" when MAX_LANES=1>>
 **Feature**: <<FILL: FID — name>>
 **Phase**: <<FILL>>
+**Depends on**: <<FILL: FIDs that must be merged first, or "none">>
 **Status**: IN PROGRESS
 
 ## Exact next step
@@ -1659,7 +2106,8 @@ See the phase file `phases/PHASE-XX-*.md` for the full criteria and the signed
 
 ## Definition of done
 Every acceptance item met + evidence in `CHANGELOG.md` + Evaluator PASS + check-architecture
-clean + PR reviewed clean (`AGENTS.md` → Definition of done).
+clean + PR reviewed clean + merged to `main` via the integration queue with the full suite
+green on the integrated main, claim released (`AGENTS.md` → Definition of done).
 END>>>
 
 FILE: .harness/ROADMAP.md
@@ -1673,16 +2121,59 @@ for **scope**. Statuses: `NOT STARTED` · `IN PROGRESS` · `BLOCKED` · `IN REVI
 **Progress**: 0 / <<FILL: total>> COMPLETE (0%)
 
 > <<FILL: this is "the requirement." List your phases and, under each, the features with a
-> permanent id (F001, F002, …), a one-line description, and a status checkbox. Each feature
-> gets full acceptance criteria in its `phases/PHASE-XX-*.md`. Keep exactly one feature
-> `IN PROGRESS` at a time. Example shape below — replace it.>>
+> permanent id (F001, F002, …), a one-line description, a `deps:` list, and a status checkbox.
+> Each feature gets full acceptance criteria in its `phases/PHASE-XX-*.md`. One feature
+> `IN PROGRESS` per lane (exactly one total when `MAX_LANES=1`). Example shape below — replace
+> it.>>
+
+## Scheduling notation (mark every feature)
+Each feature carries two tags so sequential vs. parallel vs. waiting is mechanical, not a guess:
+- **`deps:`** — the features it must **wait for** (they must be `COMPLETE` **and merged to
+  `main`**, not merely passed on a branch). `deps: none` = nothing to wait for. This is the
+  only thing that forces order.
+- **`par:`** — a parallel-group tag. Features sharing a `par:` tag are intended to run **at the
+  same time** in separate lanes; the harness allows it only if they also have no `deps:` between
+  them and disjoint modules (sprint-contract §0). `par: solo` = must run **alone** (it touches
+  the shared/pure core — take the core lock, no other lane active).
+
+How they combine, per feature:
+- **PARALLEL** — `deps:` satisfied (or none) and a shared `par:` group with others → claimable
+  now, runs beside its group-mates.
+- **SEQUENTIAL** — listed in another feature's `deps:` / has `deps:` of its own → runs in that
+  order; the dependent one **waits** until its deps merge.
+- **WAITING (blocked-until)** — `deps:` not yet merged, or `par: solo` while another lane is
+  active, or its phase not unlocked → not in the ready set yet; it waits.
+Phase gating always holds on top of this: a later phase never starts before the current phase's
+completion criteria pass. `lane ready` (scripts/SCRIPTS.md) computes the live ready set from
+these tags + `LANES.md`.
 
 ## Phase 01 — <name>
-- [ ] **F001** — <feature> — `NOT STARTED`
-- [ ] **F002** — <feature> — `NOT STARTED`
+- [ ] **F001** — <feature> — `deps: none` · `par: A` — `NOT STARTED`   <!-- PARALLEL (group A) -->
+- [ ] **F002** — <feature> — `deps: none` · `par: A` — `NOT STARTED`   <!-- PARALLEL with F001 (disjoint modules) -->
+- [ ] **F003** — <feature> — `deps: F001, F002` · `par: -` — `NOT STARTED`   <!-- WAITS for F001+F002 to merge, then runs -->
+- [ ] **F004** — <feature> — `deps: F003` · `par: solo` — `NOT STARTED`   <!-- SEQUENTIAL + SOLO: touches core, runs alone after F003 -->
 
-## Phase 02 — <name>
-- [ ] **F00N** — <feature> — `NOT STARTED`
+## Phase 02 — <name>   <!-- gated: starts only after Phase 01 completion criteria pass -->
+- [ ] **F00N** — <feature> — `deps: F004` · `par: B` — `NOT STARTED`
+
+## Parallel plan (the explicit schedule — derive from the tags, keep in sync)
+<<FILL: spell out the three buckets so a cold agent/coordinator sees the order at a glance, e.g.:
+
+Runs IN PARALLEL (independent, disjoint modules — different lanes, same time):
+  - Group A: F001 ‖ F002
+
+Runs SEQUENTIALLY (dependency order — each WAITS for the prior to MERGE):
+  - F003  waits for: F001, F002   (then runs)
+  - F004  waits for: F003         (then runs, SOLO — holds the core lock, no other lane)
+  - F00N  waits for: F004         (Phase 02, after Phase 01 completion criteria)
+
+WAITING / blocked-until (not claimable yet, and on what):
+  - F003 → until F001 & F002 merged to main
+  - F004 → until F003 merged AND no other lane active (par: solo)
+  - all Phase 02 → until Phase 01 completion criteria pass
+
+With MAX_LANES=1 this is simply the build order (one at a time, deps first). With MAX_LANES>1 it
+is how many lanes can be busy at once — never more than the widest parallel group.>>
 
 <!-- … add phases until the product is covered … -->
 END>>>
@@ -1754,6 +2245,53 @@ unattended over time.
 
 ```
 (date/time | from-runtime -> to-runtime | active feature | reason | tree state at switch)
+--- none yet ---
+```
+END>>>
+
+FILE: .harness/LANES.md
+<<<BEGIN
+# LANES — parallel build lanes, the claim ledger, the integration queue
+
+Shared coordination state, **owned by `main`** (every lane reads/writes it on `main` via short
+claim/release/enqueue commits — never edited independently on a lane branch). This is the
+mutex + dashboard that lets features run in parallel without being dropped, double-claimed, or
+broken by each other. Read `loops/parallel-loop.md` + `loops/integration-loop.md` for the how.
+
+With `MAX_LANES=1` (the default) parallel mode is **off**: one lane in the main tree, the
+classic single-feature loop. Nothing here needs filling then — the Claims table has one row (or
+none between features) and the queue is trivial. Set `MAX_LANES > 1` to turn it on.
+
+## Config
+- `MAX_LANES`: 1   <!-- concurrent lanes; 1 = parallel mode off -->
+- `MAX_INTEGRATE_ROUNDS`: 3
+
+## Claims (the git-mutex ledger — one row per active lane)
+A row here means the feature is claimed; adding/removing a row is a commit to `main`. No feature
+appears twice; no `IN PROGRESS` feature in `ROADMAP.md` is absent here.
+```
+(FID | lane branch | worktree path | owner/runtime | owned modules | status | claimed-at)
+--- none yet (single lane: work in the main tree) ---
+```
+
+## Integration queue (FIFO — lanes with a clean, CI-green PR awaiting merge to main)
+The Integrator (`loops/integration-loop.md`) takes the head, rebases on `main`, re-runs the full
+suite on the integrated result, merges only if green, then releases the claim.
+```
+(position | FID | lane branch | PR url | enqueued-at | integrateRound)
+--- empty ---
+```
+
+## Ready set (snapshot — recompute from ROADMAP deps + these claims before each claim)
+Features claimable now: deps `COMPLETE` and merged to `main`, phase unlocked, unclaimed,
+modules disjoint from every active lane. Authoritative derivation: `rules/scope-guard.md`.
+```
+--- compute with `lane ready` (scripts/SCRIPTS.md) ---
+```
+
+## History (released/merged lanes)
+```
+(FID | lane | merged-at main sha | integrate rounds | notes)
 --- none yet ---
 ```
 END>>>
@@ -1889,6 +2427,7 @@ Evaluator scores against — the same items the sprint contract maps to concrete
 
 ## F001 — <feature name>
 **Status**: NOT STARTED
+**Depends on**: <<FILL: FIDs that must be COMPLETE + merged first, or "none" — mirrors ROADMAP>>
 
 ### Acceptance criteria
 - [ ] <criterion 1 — concrete and checkable>
@@ -1897,7 +2436,7 @@ Evaluator scores against — the same items the sprint contract maps to concrete
 - [ ] E2E: primary user flow passes end-to-end (or "N/A — not user-facing").
 - [ ] Boundary invariants: obeys `rules/layer-boundaries.md` (check-architecture passes).
 - [ ] Verification: the FULL verify (CLAUDE.md → Commands, incl. e2e) passes with zero errors,
-      no regressions.
+      no regressions — and, in parallel mode, green on the integrated `main` after merge.
 
 ### Evidence expected
 <what proves each criterion — command output, test id, e2e trace, screenshot path>
@@ -1918,8 +2457,9 @@ END>>>
    encode the real import rules in `rules/layer-boundaries.md`, which flips check-architecture
    from no-op to enforcing. The loop can build features before this step; do it when the shape
    is actually decided, not sooner.
-3. `ROADMAP.md` — the phases and features (permanent F-ids) → then the per-phase
-   `phases/PHASE-XX-*.md` acceptance criteria.
+3. `ROADMAP.md` — the phases and features (permanent F-ids) with each feature's `deps:` and a
+   **parallel plan** (which run at once vs. which chain) → then the per-phase
+   `phases/PHASE-XX-*.md` acceptance criteria (each with its `Depends on:`).
 4. `rules/scope-guard.md` — the in-scope / off-limits lists from the ROADMAP phases.
 5. `CLAUDE.md` → Commands — your toolchain, including the `test` (full suite) and `e2e`
    commands; `AGENTS.md` → Tech stack — the locked stack.
@@ -1927,10 +2467,17 @@ END>>>
 7. Implement `scripts/init.sh` + `scripts/check-architecture.sh` as part of F001 (the loop
    needs them immediately); stand up the `e2e`/`smoke` runner + CI with the first user-facing
    feature (`scripts/SCRIPTS.md` → e2e).
+8. **(Optional) parallel mode** — only once ROADMAP deps are accurate and you have independent
+   ready features: set `MAX_LANES > 1` in `LANES.md`, implement `lane` + `integrate`
+   (`scripts/SCRIPTS.md`), and run `loops/parallel-loop.md` + `loops/integration-loop.md`.
+   Leave `MAX_LANES=1` and nothing changes — the classic single-feature loop.
 
-`verification/edge-cases.md`, `loops/failure-modes.md`, and `architecture/ARCHETYPES.md` are
-machinery — nothing to fill; they apply / guide from feature one.
+`verification/edge-cases.md`, `loops/failure-modes.md`, `loops/parallel-loop.md`,
+`loops/integration-loop.md`, and `architecture/ARCHETYPES.md` are machinery — nothing to fill;
+they apply / guide from feature one (parallel loops stay dormant until `MAX_LANES > 1`).
 
-Then run the loop: read state (repair if abnormal) → sprint contract (edge cases + e2e) →
-Maker → verify (full suite + e2e, regression gate) → Checker → record → PR review (CI green)
-→ next feature.
+Then run the loop (per lane): read state (repair if abnormal) → [parallel: claim a ready
+feature] → sprint contract (edge cases + e2e + owned modules) → Maker → verify (full suite +
+e2e, regression gate) → Checker → record → PR review (CI green) → [parallel: enqueue →
+Integrator merges to main one at a time, full suite green on integrated main] → next ready
+feature.

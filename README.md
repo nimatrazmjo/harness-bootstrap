@@ -5,7 +5,10 @@ self-contained file — [`HARNESS-BOOTSTRAP.md`](./HARNESS-BOOTSTRAP.md) — sca
 project-neutral `.harness/`: the maker-checker, PR-review, timer and goal **loops**, the
 workflow **graph**, the roles + rubric + evidence discipline (with a first-class **e2e +
 edge-case battery**), **failure-mode** handling for abnormal states, the **tracking system**
-(state / roadmap / task / changelog / decisions / blockers), and **runtime continuity**.
+(state / roadmap / task / changelog / decisions / blockers), **runtime continuity**, and an
+**opt-in parallel mode** — concurrent build **lanes** (git worktrees) with a git-native
+**claim ledger** (no dropped or double-claimed features) and an **integration queue** (lanes
+merge to `main` one at a time with a full re-run, so no lane breaks another).
 
 It ships **no requirement**. Product vision, roadmap, phases and architecture are left as
 placeholders you fill per project — so the same harness fits a full-stack app, a DevOps/IaC
@@ -40,7 +43,17 @@ Then tell your coding agent (Claude Code, etc.), in that repo:
 3. **Toolchain + first run**: set `CLAUDE.md` → Commands and `AGENTS.md` → Tech stack, then
    write the first `PROJECT_STATE.md` + `CURRENT_TASK.md` + `loops/loop-state.md`.
 
+## Parallel features (opt-in)
+
+The harness ships single-feature-at-a-time (`MAX_LANES=1`) — its default and its original
+discipline. Turn on parallel work by setting `MAX_LANES > 1` in `.harness/LANES.md`: mark each
+feature's `deps:` in `ROADMAP.md` (what must be done sequentially) and the **parallel plan**
+(what can run at once), and the **ready set** + lane/integration loops do the rest. Two git-level
+guarantees keep it safe: **claiming** a feature is a commit to `main`, so a race is a mutex (no
+feature dropped or double-claimed); and the **integration queue** merges lanes one at a time with
+a full re-run on the integrated `main` (cross-feature regressions caught before they land).
+
 ## What it produces
 
-38 files under `.harness/`. The full tree is at the top of `HARNESS-BOOTSTRAP.md`, and the
+41 files under `.harness/`. The full tree is at the top of `HARNESS-BOOTSTRAP.md`, and the
 bootstrap ends with a self-check (all files present, no delimiter leaks, valid `graph.json`).
