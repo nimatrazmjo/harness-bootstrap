@@ -1,0 +1,9 @@
+{
+  "name": "harness",
+  "description": "Portable closed-loop build harness: scaffolds .harness/ (loops, rubric, tracking) and the optional .claude/ enforcement layer from HARNESS-BOOTSTRAP.md.",
+  "version": "0.3.0",
+  "repository": "https://github.com/nimatrazmjo/harness-bootstrap",
+  "author": {
+    "name": "nimatrazmjo"
+  }
+}

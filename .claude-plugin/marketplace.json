@@ -1,0 +1,14 @@
+{
+  "name": "harness-bootstrap",
+  "owner": {
+    "name": "nimatrazmjo"
+  },
+  "plugins": [
+    {
+      "name": "harness",
+      "source": "./",
+      "description": "Scaffold the portable build harness into the current repo."
+    }
+  ],
+  "description": "The portable build harness, installable as a Claude Code plugin."
+}

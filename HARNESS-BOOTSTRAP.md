@@ -1,4 +1,4 @@
-# HARNESS-BOOTSTRAP — portable closed-loop build harness
+# HARNESS-BOOTSTRAP — portable, LLM-agnostic closed-loop build harness
 
 This one file recreates a complete, project-neutral `.harness/` in any repository:
 the **loops** (maker-checker, PR-review, timer, goal) and their **failure modes**, the
@@ -8,26 +8,112 @@ the **loops** (maker-checker, PR-review, timer, goal) and their **failure modes*
 **runtime continuity**. It also ships an **opt-in parallel mode** — concurrent build
 **lanes** (git worktrees) coordinated by a git-native **claim ledger** so no feature is
 dropped or double-claimed, and an **integration queue** that merges lanes to `main` one at a
-time with a full re-run so no lane breaks another. It ships **no requirement** — the product
-vision, the roadmap
-features, the phases and the architecture are left as empty placeholders you fill in
-after scaffolding.
+time with a full re-run so no lane breaks another.
+
+**It works in two modes** (the agent detects which — see *Mode* below):
+- **Greenfield** — an empty/new repo. It ships **no requirement**: product vision, roadmap,
+  phases and architecture are left as placeholders you fill in after scaffolding.
+- **Adopt (existing repo)** — a repo that already has code. The agent **reads the codebase
+  first**, then fills the harness from reality: it infers the stack + commands, picks the
+  architecture archetype, reverse-engineers the module map and import boundaries, reconstructs
+  the roadmap from what already ships (marking it `COMPLETE` against the repo's own green test
+  baseline), and sets `CURRENT_TASK` to the next real increment. The harness wraps the
+  existing project instead of restarting it.
+
+**It is LLM-agnostic.** The canonical operating contract lives in one vendor-neutral file,
+`.harness/AGENTS.md`. The bootstrap also writes thin **entry-point files** at the repo root —
+`AGENTS.md`, `CLAUDE.md`, `GEMINI.md`, `.github/copilot-instructions.md`,
+`.cursor/rules/harness.mdc`, `.windsurf/rules/harness.md` — that each redirect to that one
+contract, so the same harness drives Claude, Gemini/Antigravity, GitHub Copilot, Cursor,
+Windsurf, Codex/ChatGPT, Grok, or any other coding agent with **no content duplication and no
+drift**. Add a one-line pointer for any tool not listed; the contract never changes.
+
+**Optional Claude Code layer.** The last section ships `.claude/` — permissions, hooks, skills
+and subagents that make Claude Code *enforce* rules the markdown states (commit only on a green
+suite, no `COMPLETE` without evidence, Checker in a separate context). Other agents skip it and
+still get the full harness.
 
 ## How to use
 
 **Agent path (recommended).** Drop this file at the root of the target repo and tell your
-coding agent:
+coding agent (any of them — Claude, Gemini/Antigravity, Copilot, Cursor, Windsurf,
+Codex/ChatGPT, Grok, …):
 
-> Read `HARNESS-BOOTSTRAP.md` at the repo root and scaffold the harness: create every file it
+> Read `HARNESS-BOOTSTRAP.md` at the repo root and scaffold the harness. First decide the
+> **Mode** (see "Mode" below): if this repo already contains application code, you are in
+> **Adopt** mode; if it is empty/new, **Greenfield**. Then create every file this document
 > defines verbatim at the path in its `FILE:` header (content between `<<<BEGIN` and `END>>>`),
-> making directories as needed. Don't clobber anything that already exists. Leave every
-> `<<FILL: …>>` placeholder exactly as written — I'll add the product, roadmap, and
-> architecture later. Do NOT fill the architecture files or write `layer-boundaries.md` yet;
-> that waits until I give you the requirement (`check-architecture` stays a no-op until then).
-> When done, run the Self-check below and report the counts, then delete this bootstrap file.
+> making directories as needed — including the repo-root entry-point files (`AGENTS.md`,
+> `CLAUDE.md`, `GEMINI.md`, `.github/copilot-instructions.md`, `.cursor/rules/harness.mdc`,
+> `.windsurf/rules/harness.md`). Don't clobber anything that already exists; if a root
+> entry-point file is already present, append the harness pointer instead of overwriting.
+> Scaffold the final *Optional — Claude Code layer* section only if this repo uses Claude Code.
+>
+> **Greenfield:** leave every `<<FILL: …>>` placeholder exactly as written — I'll add the
+> product, roadmap, and architecture later. Do NOT fill the architecture files or
+> `layer-boundaries.md` yet (`check-architecture` stays a no-op until then).
+>
+> **Adopt:** follow the *Adopt procedure* below — read the codebase first, then fill the
+> requirement + architecture + tracking files from what actually exists (detect the toolchain
+> for the Commands table, pick an archetype, write real `layer-boundaries.md`, reconstruct the
+> ROADMAP from shipped work against the repo's green test baseline, and record all of it in
+> `ADOPTION.md`). Do not invent features the code doesn't have.
+>
+> When done, run the Self-check below and report the counts. Delete this bootstrap file only if
+> it is not itself a tracked deliverable of this repo.
 
 **Manual path.** Each block below is a complete file. Copy the text between `<<<BEGIN`
 and `END>>>` into the file named in the `FILE:` header.
+
+## Mode — greenfield vs. adopt (existing repo)
+
+The first thing the agent decides. It changes only *how the requirement files are filled*, not
+the machinery (loops, graph, rules, verification, scripts are identical either way).
+
+**Detect:** is there application code in the repo already (source beyond config, docs, and this
+bootstrap)? A quick signal: a dependency manifest with real source dirs, a test suite, a build.
+- **No** → **Greenfield.** Scaffold with placeholders; fill the requirement later. This is the
+  original behavior.
+- **Yes** → **Adopt.** Scaffold the machinery, then run the *Adopt procedure* below to fill the
+  requirement, architecture, and tracking files from the real code before you stop.
+
+If it's ambiguous (a stub repo, a README-only repo), treat it as greenfield and say so in
+`ADOPTION.md`.
+
+## Adopt procedure (existing repo) — read first, then fill from reality
+
+Do this **after** the machinery files are written and **before** the self-check, only in Adopt
+mode. Inspect the codebase; never invent features or evidence the code doesn't support.
+
+1. **Survey the repo.** Read the dependency manifest(s), the directory layout, the entry
+   points, the test setup, CI config, and the existing README/docs. Record findings in
+   `.harness/ADOPTION.md`.
+2. **Detect the toolchain → Commands.** Derive install / dev / typecheck / lint / test / e2e /
+   build from the manifest + scripts and write them into `.harness/SESSION-CHECKLIST.md` →
+   Commands and the stack into `.harness/AGENTS.md` → Tech stack. Use what the repo actually
+   uses; don't impose a new package manager.
+3. **Establish the baseline.** Run the repo's existing test/build once. A **green existing
+   suite is the adoption evidence** for already-shipped work; if it's red or missing, say so in
+   `ADOPTION.md` and `BLOCKERS.md` — fixing/standing-up the baseline becomes the first task.
+4. **Pick the archetype + architecture.** Match the repo to the closest shape in
+   `architecture/ARCHETYPES.md` (full-stack / DevOps-IaC / Airflow / other), then fill
+   `ARCHITECTURE.md` + `MODULES.md` (+ `DATA_MODEL.md` / `API_SURFACE.md` where they apply)
+   from the real structure, and **write real `rules/layer-boundaries.md` from the imports the
+   code already follows** — this flips `check-architecture` from no-op to an enforcing gate that
+   codifies the existing design. Note any boundaries the code currently violates as debt in
+   `BLOCKERS.md`, don't silently bless them.
+5. **Reconstruct the ROADMAP from what ships.** List the already-built capabilities as features
+   with permanent ids (`F001`…), status `COMPLETE`, `deps:` reflecting reality, and evidence =
+   "adopted (pre-harness); baseline suite green" in `CHANGELOG.md`. Then add the **next**
+   increment(s) as `NOT STARTED` — the real work going forward. `product/PRODUCT.md` +
+   `PERSONAS.md` are reverse-engineered from what the project clearly does.
+6. **Set the live state.** `PROJECT_STATE.md`, `CURRENT_TASK.md`, `loops/loop-state.md` point at
+   the next real feature, not a from-scratch F001. `rules/scope-guard.md` lists the current
+   phase's in/off-limits from the reconstructed ROADMAP.
+7. **Honesty rule for adopted work.** Adopted `COMPLETE` features did not pass the maker-checker
+   loop. They are trusted only as far as the baseline suite proves. The moment one is *changed*,
+   it re-enters the loop (contract → maker → verify → checker) and earns real evidence. Record
+   this in `ADOPTION.md` so a cold agent doesn't mistake "adopted" for "loop-verified".
 
 ## Preconditions & safety (the bootstrap is idempotent)
 
@@ -36,33 +122,64 @@ gracefully, it does not abort the scaffold:
 
 - **Existing `.harness/`** — do NOT clobber. If a file already exists, leave it and report
   the skip. Only create what is missing. (Re-running this file must be safe.)
+- **Existing root entry-point files** — `AGENTS.md`, `CLAUDE.md`, `GEMINI.md`,
+  `.github/copilot-instructions.md`, etc. may already exist with the user's own rules. Do NOT
+  overwrite: **append** the harness pointer block (a few lines naming `.harness/AGENTS.md` as
+  the canonical contract) to the end, and report the append. The user's existing instructions
+  stay; the pointer just adds the harness read-order on top.
 - **Git repo** — if the target isn't a git repo, run `git init` first (the loop needs
-  commits). If there's no `origin` remote or no `gh` CLI, still scaffold, but note that the
-  **PR-review loop is inert until a remote + `gh` exist**; maker-checker + local verify still
-  run fully.
+  commits). If there's no `origin` remote or no `gh`/forge CLI, still scaffold, but note that
+  the **PR-review loop is inert until a remote + a PR CLI exist**; maker-checker + local verify
+  still run fully.
 - **Default branch** — detect it (`git symbolic-ref --short HEAD`, or `main`/`master`); use
   that name everywhere the docs say `main`.
-- **Toolchain** — leave `CLAUDE.md → Commands` as `<placeholders>` unless the repo's manifest
-  makes the real commands obvious; never guess a package manager into the docs.
+- **Toolchain** — in Greenfield, leave `SESSION-CHECKLIST.md → Commands` as `<placeholders>`
+  unless the repo's manifest makes the real commands obvious; never guess a package manager
+  into the docs. In Adopt, fill them from the real manifest (Adopt procedure step 2).
+- **LLM-agnostic** — the entry-point files are thin pointers; the one contract they point to is
+  `.harness/AGENTS.md`. Never fork tool-specific rules into them, and never name a single
+  vendor's tool inside the canonical contract.
+- **Existing `.claude/settings.json`** (optional layer only) — merge the harness `permissions`
+  and `hooks` into it; never overwrite the user's settings.
 
 ## Self-check (prove the scaffold end-to-end)
 
 After creating the tree, verify the bootstrap actually landed — don't assume:
 
-1. Every `FILE:` path in this document exists on disk (**41 files**).
-2. No file still contains the literal `<<<BEGIN` / `END>>>` delimiters (a transcription leak).
+1. Every `FILE:` path in this document exists on disk (**48 files**: 42 under `.harness/` + 6
+   tool entry-point files at the repo root; **64** with the optional `.claude/` layer's 16).
+2. No generated file contains a **standalone** `<<<BEGIN` or `END>>>` line — i.e. the extraction
+   boundary (grep `'^<<<BEGIN$'` / `'^END>>>$'`). A backticked mention of the token inside a
+   file's prose is NOT a leak (a docs/tooling repo that documents its own format will contain
+   such mentions; that is expected).
 3. `graph/graph.json` parses as JSON.
-4. Machinery files contain **no** `<<FILL: …>>` markers; only the 9 requirement files +
-   `CLAUDE.md` Commands + `AGENTS.md` Tech-stack + the three first-run tracking files do.
-   (`LANES.md` + the two parallel-loop files are machinery — no `<<FILL>>`; parallel mode is
-   opt-in and ships off, `MAX_LANES=1`.)
+4. Machinery files contain **no** `<<FILL:` marker (the colon form — grep `'<<FILL:'`). In
+   Greenfield exactly 16 files carry it: the requirement files (`product/PRODUCT.md`,
+   `product/PERSONAS.md`, `architecture/ARCHITECTURE.md`, `DATA_MODEL.md`, `API_SURFACE.md`,
+   `MODULES.md`, `ROADMAP.md`, the active `phases/PHASE-XX-*.md`, `rules/scope-guard.md`,
+   `rules/layer-boundaries.md`) + `SESSION-CHECKLIST.md` Commands + `AGENTS.md` Tech-stack +
+   `RUNTIME-CONTINUITY.md` failover CLIs + the three first-run tracking files (`PROJECT_STATE.md`,
+   `CURRENT_TASK.md`, `loops/loop-state.md`). In **Adopt** mode even those are filled, so grep
+   `'<<FILL:'` returns nothing. A backticked `<<FILL>>` in prose that explains the discipline is
+   not a marker. (`LANES.md` + the two parallel-loop files + the 6 entry-point pointers +
+   `ADOPTION.md` are machinery — no marker; parallel mode is opt-in and ships off, `MAX_LANES=1`.)
+5. **LLM-agnostic wiring:** every root entry-point file points to `.harness/AGENTS.md` as the
+   canonical contract, and `.harness/AGENTS.md` names no single vendor's tool.
+6. **Adopt mode only:** the requirement + architecture + tracking files are filled from real
+   code (no `<<FILL>>` left), `rules/layer-boundaries.md` has real rules, and `ADOPTION.md`
+   records the stack, archetype, baseline status, and what was adopted vs. loop-verified.
+7. **Claude layer only:** `.claude/settings.json` parses as JSON; `bash -n` passes on each
+   `.claude/hooks/*.sh`; `jq` is installed; the layer has no `<<FILL:` marker.
 
-Report the counts. Then delete this bootstrap file.
+Report the counts. Then delete this bootstrap file **unless it is a tracked deliverable of this
+repo** (e.g. the harness-bootstrap repo itself ships this file — keep it there).
 
 ## What you fill in afterward ("the requirement")
 
 Nothing project-specific is written at scaffold time. When you bring the requirement, fill
-these — and only these:
+these — and only these. **In Adopt mode you fill the same files, but now and from the existing
+code** (the *Adopt procedure* above), not "later" — the list is identical, only the source of
+the content differs (reality vs. a fresh spec):
 
 **The product + scope (always):**
 - `.harness/product/PRODUCT.md`, `.harness/product/PERSONAS.md`
@@ -84,22 +201,38 @@ your ROADMAP deps are accurate; the ready set and the lane/integration loops do 
 - Until you write real boundaries, **`check-architecture` is a no-op**, so the loop runs from
   feature one with no architecture yet. Writing the rules flips it to an enforcing gate.
 
-**The toolchain + first run:** set `.harness/CLAUDE.md` → Commands to your commands,
+**The toolchain + first run:** set `.harness/SESSION-CHECKLIST.md` → Commands to your commands,
 `.harness/AGENTS.md` → Tech stack, then write the first `.harness/PROJECT_STATE.md` +
 `.harness/CURRENT_TASK.md` + `loops/loop-state.md`. Everything else is machinery and stays
 as-is.
 
+**The entry-point files (LLM-agnostic — machinery, not filled):** the bootstrap writes the
+canonical contract to `.harness/AGENTS.md` and thin pointers at the repo root (`AGENTS.md`,
+`CLAUDE.md`, `GEMINI.md`, `.github/copilot-instructions.md`, `.cursor/rules/harness.mdc`,
+`.windsurf/rules/harness.md`). Whichever agent opens the repo loads its own file, follows the
+pointer, and obeys the one contract. To support another tool, drop a one-line pointer in its
+convention; never copy the contract.
+
 ## Tree this produces
 
 ```
+# Repo-root entry-point files — LLM-agnostic pointers, all → .harness/AGENTS.md  ── machinery
+AGENTS.md                     # cross-tool standard (Codex/ChatGPT, Grok, Cursor, …) → pointer
+CLAUDE.md                     # Claude / Claude Code                                → pointer
+GEMINI.md                     # Gemini CLI / Google Antigravity                     → pointer
+.github/copilot-instructions.md   # GitHub Copilot                                  → pointer
+.cursor/rules/harness.mdc     # Cursor                                              → pointer
+.windsurf/rules/harness.md    # Windsurf                                            → pointer
+
 .harness/
 ├── README.md                 # what the harness is + read order
-├── AGENTS.md                 # operating contract (the rules)  ── machinery
-├── CLAUDE.md                 # session bootstrap checklist      ── machinery (Commands = fill)
-├── RUNTIME-CONTINUITY.md     # two-runtime failover on limits   ── machinery
+├── AGENTS.md                 # CANONICAL operating contract (vendor-neutral)  ── machinery
+├── SESSION-CHECKLIST.md      # per-session checklist (was CLAUDE.md)  ── machinery (Commands = fill)
+├── ADOPTION.md               # existing-repo discovery: stack/archetype/baseline  ── machinery
+├── RUNTIME-CONTINUITY.md     # multi-runtime failover on limits   ── machinery
 ├── RUNTIME-SWITCHES.md       # runtime switch ledger (empty)
 ├── PROJECT_STATE.md          # MASTER: where we are (skeleton)
-├── ROADMAP.md                # features × phases (FILL)
+├── ROADMAP.md                # features × phases (FILL / reconstruct in Adopt)
 ├── CURRENT_TASK.md           # the one active feature (skeleton)
 ├── CHANGELOG.md              # completed-with-evidence history (skeleton)
 ├── DECISIONS.md              # decision log (skeleton)
@@ -132,17 +265,31 @@ as-is.
 ├── state/
 │   └── clean-state-checklist.md                                      ── machinery
 ├── product/
-│   ├── PRODUCT.md            # (FILL)
-│   └── PERSONAS.md           # (FILL)
+│   ├── PRODUCT.md            # (FILL / reverse-engineer in Adopt)
+│   └── PERSONAS.md           # (FILL / reverse-engineer in Adopt)
 └── architecture/
-    ├── ARCHETYPES.md         # 3 project shapes to fill from         ── machinery
-    ├── ARCHITECTURE.md       # (FILL — after requirement)
+    ├── ARCHETYPES.md         # 4 project shapes to fill from         ── machinery
+    ├── ARCHITECTURE.md       # (FILL — after requirement / from code in Adopt)
     ├── DATA_MODEL.md         # (FILL — optional by archetype)
     ├── API_SURFACE.md        # (FILL — optional by archetype)
-    ├── MODULES.md            # (FILL — after requirement)
+    ├── MODULES.md            # (FILL — after requirement / from code in Adopt)
     └── decisions/
         └── ADR-template.md   # generic ADR template                 ── machinery
+
+# OPTIONAL — Claude Code layer (skip for other agents)              ── machinery
+.claude/
+├── settings.json             # deny/ask/allow floor + hook wiring
+├── README.md                 # what each piece enforces; deny list = floor, not rulebook
+├── hooks/                    # session-start.sh · stop.sh · pre-tool.sh
+├── rules/                    # context.md (always) · harness-files.md · tests.md (by path)
+├── skills/                   # harness-start · -feature · -verify · -record · -lane
+└── agents/                   # evaluator · simplicity-reviewer · integrator
 ```
+
+The 6 root entry-point files are thin pointers (a few lines each) to the one canonical contract
+`.harness/AGENTS.md`; whichever agent opens the repo reads its own file and obeys the same
+rules. That is the LLM-agnostic layer — add a pointer for any other tool, never a second copy
+of the contract.
 
 Statuses used everywhere: `NOT STARTED` · `IN PROGRESS` · `BLOCKED` · `IN REVIEW` ·
 `COMPLETE` · `DEPRECATED`. Feature ids are `F001`, `F002`, … Branches are `feat/<FID>`
@@ -164,8 +311,18 @@ working system so it builds the right thing, verifies its own work, and — thro
 persistent tracking system below — survives across sessions without relying on
 conversation history.
 
-**There is no application code here.** This folder is a persistent tracking system +
-rules + specs. A coding agent reads it, then writes the app one verified feature at a time.
+**The `.harness/` folder is a persistent tracking system + rules + specs — not application
+code.** In a greenfield repo it is all there is at first; in an **adopted** repo it sits
+alongside the existing codebase and describes it (see `ADOPTION.md`). Either way, a coding
+agent reads it, then writes/extends the app one verified feature at a time.
+
+## Any coding agent (LLM-agnostic)
+This harness is not tied to one tool. The canonical operating contract is **`AGENTS.md`** in
+this folder. At the repo root, one thin pointer file per tool — `AGENTS.md`, `CLAUDE.md`,
+`GEMINI.md`, `.github/copilot-instructions.md`, `.cursor/rules/harness.mdc`,
+`.windsurf/rules/harness.md` — redirects here, so Claude, Gemini/Antigravity, Copilot, Cursor,
+Windsurf, Codex/ChatGPT, Grok, or any other agent runs the same loop from the same rules. There
+is exactly one contract; the rest are pointers.
 
 ## Read order (every session starts here)
 1. `PROJECT_STATE.md` — **MASTER FILE.** Where the project is. Read this before anything.
@@ -173,6 +330,8 @@ rules + specs. A coding agent reads it, then writes the app one verified feature
 3. `ROADMAP.md` — all features across the phases, with status.
 4. The active `phases/PHASE-XX-*.md` — acceptance criteria.
 5. `DECISIONS.md` + `BLOCKERS.md`, then inspect the real code.
+
+(The full rules are in `AGENTS.md`; the per-session checklist is `SESSION-CHECKLIST.md`.)
 
 ## Layout
 ```
@@ -183,8 +342,9 @@ rules + specs. A coding agent reads it, then writes the app one verified feature
 ├── CHANGELOG.md       # completed-implementation history (evidence)
 ├── DECISIONS.md       # decision log (indexes the ADRs)
 ├── BLOCKERS.md        # known blockers
-├── AGENTS.md          # operating contract (the rules)
-├── CLAUDE.md          # session bootstrap checklist
+├── AGENTS.md          # CANONICAL operating contract (the rules) — vendor-neutral
+├── SESSION-CHECKLIST.md  # per-session bootstrap checklist
+├── ADOPTION.md        # existing-repo discovery (stack, archetype, baseline, adopted vs verified)
 ├── RUNTIME-CONTINUITY.md # runtime failover on session limits
 ├── RUNTIME-SWITCHES.md   # runtime switch ledger
 ├── phases/            # PHASE-01..N — feature defs + acceptance criteria
@@ -195,28 +355,50 @@ rules + specs. A coding agent reads it, then writes the app one verified feature
 ├── loops/             # goal, timer, maker-checker, pr-review + loop-state
 ├── graph/             # workflow-graph (+ json) — the loop, drawn
 └── scripts/           # SCRIPTS.md — automation contracts (specs, not code)
+# repo root: AGENTS.md / CLAUDE.md / GEMINI.md / .github/copilot-instructions.md /
+#            .cursor/rules/harness.mdc / .windsurf/rules/harness.md — pointers to AGENTS.md above
+# optional:  .claude/ — Claude Code hooks/permissions/skills/agents that enforce these rules
 ```
 
 ## The tracking system (why it exists)
 The project must not depend on chat history to know what's done. `PROJECT_STATE.md`
 answers "where am I?", `ROADMAP.md` answers "where am I going?", `CURRENT_TASK.md`
 answers "what do I do now?". After implementing and verifying, the agent updates the
-tracking files and picks the next task. A brand-new session can enter the repo and
-continue with no prior context.
+tracking files and picks the next task. A brand-new session — in any tool — can enter the repo
+and continue with no prior context.
 
 ## The idea in one line
-Rules-first entry points (`AGENTS.md`/`CLAUDE.md`/`rules/`), an agent-readable workspace
-(this tree), multi-session continuity (the tracking files), runtime feedback + scope
-control (`rules/` + `scripts/`), self-verification + role separation (`verification/`),
-automated loops (`loops/`), and the workflow drawn as a graph (`graph/`).
+One vendor-neutral contract (`AGENTS.md`) reachable from every tool's entry file, an
+agent-readable workspace (this tree), multi-session continuity (the tracking files), runtime
+feedback + scope control (`rules/` + `scripts/`), self-verification + role separation
+(`verification/`), automated loops (`loops/`), and the workflow drawn as a graph (`graph/`).
 END>>>
 
 FILE: .harness/AGENTS.md
 <<<BEGIN
-# AGENTS.md — Operating Contract
+# AGENTS.md — Operating Contract (canonical, vendor-neutral)
 
-You are a coding agent building this project. This file overrides your defaults. Read it
-fully. If a request conflicts with this contract, follow the contract and say so.
+You are a coding agent building this project — **any** agent: Claude, Gemini/Antigravity,
+GitHub Copilot, Cursor, Windsurf, Codex/ChatGPT, Grok, or another. This file overrides your
+defaults. Read it fully. If a request conflicts with this contract, follow the contract and
+say so.
+
+**This is the one contract.** The repo-root files (`AGENTS.md`, `CLAUDE.md`, `GEMINI.md`,
+`.github/copilot-instructions.md`, `.cursor/rules/harness.mdc`, `.windsurf/rules/harness.md`)
+are thin pointers to this file — whichever one your tool loaded, the rules are here. Nothing in
+this contract is tool-specific: where it says "run the verify" or "do a review pass", use
+whatever command or capability your tool provides (`SESSION-CHECKLIST.md` → Commands has the
+project's exact commands). Never fork tool-specific rules into a pointer file. Tool-specific
+*enforcement and usage* (hooks, permissions, skills) may live in an optional tool layer such
+as `.claude/`; it enforces these rules, it never adds new ones.
+
+## Mode — greenfield vs. adopted repo
+If `ADOPTION.md` exists and records an adoption, this harness was wrapped around a **pre-existing
+codebase**: features marked `COMPLETE` with evidence "adopted (pre-harness)" were NOT built
+under this loop — they are trusted only as far as the baseline test suite proves. The moment you
+**change** an adopted area, it re-enters the full loop (sprint contract → maker → verify →
+checker) and must earn real evidence. A greenfield repo (no adoption in `ADOPTION.md`) has no
+such inherited work — everything is built under the loop from F001.
 
 ## What this project is
 See `product/PRODUCT.md` for the vision and `architecture/ARCHITECTURE.md` for the shape.
@@ -253,9 +435,10 @@ Build the product the requirement describes — never a shortcut that fakes the 
    a defect. `check-architecture` enforces this and a violation blocks "done".
 5. **Stay in scope + phase.** `rules/scope-guard.md` lists what is off-limits for the
    current phase. Phases are gated (ROADMAP order). Don't build a later phase's features now.
-6. **Modular and expandable.** New types, importers, exporters, and actions register
-   against interfaces (`architecture/MODULES.md`); they do not edit the core. If adding a
-   feature forces a core edit that a registry should handle, the abstraction is wrong.
+6. **Rule of three.** If an extension point already exists (`architecture/MODULES.md`), use
+   it — don't edit the core around it. Otherwise write the direct version, even if it
+   duplicates a sibling. Abstract on the third real occurrence, not the first or second, and
+   record it in `DECISIONS.md` when you do. A seam with one user is a defect (rubric 4 + 6).
 7. **Separate maker from checker.** After implementing (maker), switch to the Evaluator
    role (`verification/roles.md`) and score honestly against `verification/evaluator-rubric.md`.
    You may not approve your own work by assertion.
@@ -283,11 +466,11 @@ No "almost done", "mostly working", "probably fine".
 ```
 read PROJECT_STATE + CURRENT_TASK + ROADMAP + phase file  ->  confirm the ONE IN PROGRESS feature
   ->  write/confirm sprint-contract  ->  implement (Maker)
-  ->  verify (CLAUDE.md Commands: typecheck, lint, FULL tests, check-architecture, e2e)
+  ->  verify (SESSION-CHECKLIST.md Commands: typecheck, lint, FULL tests, check-architecture, e2e)
   ->  score as Checker (evaluator-rubric; edge-cases battery; no regressions)
   ->  pass? record evidence in CHANGELOG, mark COMPLETE in ROADMAP + phase file
       fail? log defects, revise, repeat (bounded rounds)
-  ->  push branch, open/reuse PR, review it (code-review, loops/pr-review-loop.md)
+  ->  push branch, open/reuse PR, review it (a code-review pass, loops/pr-review-loop.md)
       clean? enqueue the lane for integration (loops/integration-loop.md), then claim next ready feature
       issues? fix (Maker), commit, push, review again (bounded rounds)
   ->  update PROJECT_STATE + LANES + CURRENT_TASK + BLOCKERS  ->  stop cleanly
@@ -295,21 +478,8 @@ read PROJECT_STATE + CURRENT_TASK + ROADMAP + phase file  ->  confirm the ONE IN
 The explicit version, with routing rules, is `graph/workflow-graph.md`.
 
 ## Parallel lanes (opt-in — `MAX_LANES` in `LANES.md`; default 1)
-A **lane** is one build stream: a git worktree + a `lane/<FID>` branch + one active feature.
-`MAX_LANES=1` is the classic single-feature loop and the default; set it higher to run
-features concurrently. Two invariants make parallel safe:
-- **No missing / double-claimed feature.** A feature becomes `IN PROGRESS` only by a lane
-  **claiming** it — a one-line commit to `LANES.md` on `main`. Git is the mutex: if two lanes
-  race, the second push is rejected, it rebases, sees the feature taken, and claims another
-  from the ready set. Every `IN PROGRESS` feature has exactly one lane; every lane has exactly
-  one. Only features in the **ready set** (all deps `COMPLETE` **and merged to main**, phase
-  unlocked, no module overlap with an active lane — `rules/scope-guard.md`) are claimable.
-- **No lane breaks another.** Lanes never merge to `main` ad hoc. A clean PR puts the lane in
-  the **integration queue** (`loops/integration-loop.md`): the Integrator merges one lane at a
-  time — rebase on current `main`, resolve conflicts, re-run the FULL suite + e2e **on the
-  integrated main**, and only a green integrated main lets the next lane in. A per-lane green
-  PR is necessary but not sufficient; the cross-feature regression gate is at integrate.
-See `loops/parallel-loop.md` (spawn/claim/run) and `loops/integration-loop.md` (merge queue).
+Off by default. When on: claim before you build (a commit to `LANES.md` on `main` is the
+mutex), and lanes reach `main` only through the integration queue. `loops/parallel-loop.md`.
 
 ## Definition of done (per feature)
 - Every acceptance criterion in the phase file met.
@@ -365,11 +535,13 @@ manager. Keep it here so every session honors the same choices. No dependency th
 justified by the active feature.>>
 END>>>
 
-FILE: .harness/CLAUDE.md
+FILE: .harness/SESSION-CHECKLIST.md
 <<<BEGIN
-# CLAUDE.md — Session Bootstrap
+# SESSION-CHECKLIST — Session Bootstrap (tool-neutral)
 
-Quick reference. `AGENTS.md` is the full contract; this is the checklist you run every session.
+Quick reference for any coding agent. `AGENTS.md` is the full, canonical contract; this is the
+checklist you run every session. (This file was `CLAUDE.md` in older harnesses — renamed so no
+single vendor owns the checklist. The repo-root tool pointers lead here via `AGENTS.md`.)
 
 ## On session start (in order)
 1. Read `PROJECT_STATE.md` — the master file. Where we are.
@@ -432,13 +604,210 @@ the Checker run. Keep this table current — it's the first thing the next agent
 live in `CURRENT_TASK.md`.>>
 
 ## Before you stop
-Run the Session-completion protocol in `AGENTS.md`: update PROJECT_STATE, LANES (your row),
-your lane's CURRENT_TASK, ROADMAP (+ phase file), CHANGELOG, BLOCKERS/DECISIONS as needed;
-leave the tree clean (`state/clean-state-checklist.md`); commit on `feat/<FID>` (or
-`docs/<slug>`/`chore/<slug>` for harness-only work). If the feature just went COMPLETE: push,
-open/reuse the PR, review it, fix findings until clean (`loops/pr-review-loop.md`), then
-enqueue the lane for integration (`loops/integration-loop.md`) — don't merge ad hoc. Start the
-lane's next feature only once the current one is queued/merged.
+`AGENTS.md` → Session-completion protocol, then `state/clean-state-checklist.md`.
+END>>>
+
+═══════════════════════════════════════════════════════════════════════════════════════
+         LLM-AGNOSTIC ENTRY POINTS (repo root — thin pointers to .harness/AGENTS.md)
+═══════════════════════════════════════════════════════════════════════════════════════
+
+These six files sit at the **repo root** (not inside `.harness/`). Each is a thin pointer so
+that whichever agent opens the repo loads its own convention file and is routed to the one
+canonical contract, `.harness/AGENTS.md`. The bodies are intentionally near-identical — they
+are redirects, not copies of the rules. If a root file already exists with the user's own
+instructions, append the pointer block instead of overwriting.
+
+FILE: AGENTS.md
+<<<BEGIN
+# AGENTS.md — this repository runs on a build harness
+
+This repo is governed by a portable, closed-loop build **harness**. The rules are not specific
+to any one AI tool. This file is the cross-tool [agents.md](https://agents.md) entry point; it
+**points to the one canonical contract**, which every tool shares.
+
+> **Canonical operating contract: [`.harness/AGENTS.md`](.harness/AGENTS.md). Read it in full
+> before doing anything, and follow it even where it overrides your defaults.**
+
+Every session, read in order:
+1. `.harness/PROJECT_STATE.md` — master: where the project is.
+2. `.harness/CURRENT_TASK.md` — the one feature to work next.
+3. `.harness/ROADMAP.md` — all features + status + deps.
+4. the active `.harness/phases/PHASE-XX-*.md` — acceptance criteria.
+5. `.harness/DECISIONS.md` + `.harness/BLOCKERS.md`, then inspect the real code.
+
+Then obey `.harness/AGENTS.md`: one feature at a time, no victory without evidence, update the
+tracking files before you stop. `.harness/SESSION-CHECKLIST.md` is the per-session checklist;
+`.harness/ADOPTION.md` says whether this repo was adopted (pre-existing code) or greenfield.
+
+This file is only a pointer — do not duplicate the contract here; edit `.harness/AGENTS.md`.
+END>>>
+
+FILE: CLAUDE.md
+<<<BEGIN
+# CLAUDE.md — this repository runs on a build harness
+
+This repo is governed by a portable, closed-loop build **harness**. Its rules are tool-neutral
+and shared with every other agent via one canonical file.
+
+> **Canonical operating contract: [`.harness/AGENTS.md`](.harness/AGENTS.md). Read it in full
+> before doing anything, and follow it even where it overrides your defaults.**
+
+Every session, read in order:
+1. `.harness/PROJECT_STATE.md` — master: where the project is.
+2. `.harness/CURRENT_TASK.md` — the one feature to work next.
+3. `.harness/ROADMAP.md` — all features + status + deps.
+4. the active `.harness/phases/PHASE-XX-*.md` — acceptance criteria.
+5. `.harness/DECISIONS.md` + `.harness/BLOCKERS.md`, then inspect the real code.
+
+Then obey `.harness/AGENTS.md`: one feature at a time, no victory without evidence, update the
+tracking files before you stop. `.harness/SESSION-CHECKLIST.md` is the per-session checklist;
+`.harness/ADOPTION.md` says whether this repo was adopted (pre-existing code) or greenfield.
+
+This file is only a pointer — do not duplicate the contract here; edit `.harness/AGENTS.md`.
+The import below loads the contract every session; Claude-only usage lives in `.claude/`.
+
+@.harness/AGENTS.md
+END>>>
+
+FILE: GEMINI.md
+<<<BEGIN
+# GEMINI.md — this repository runs on a build harness
+
+For Gemini CLI and Google Antigravity (and any Gemini-based agent). This repo is governed by a
+portable, closed-loop build **harness** whose rules are tool-neutral and shared via one file.
+
+> **Canonical operating contract: [`.harness/AGENTS.md`](.harness/AGENTS.md). Read it in full
+> before doing anything, and follow it even where it overrides your defaults.**
+
+Every session, read in order:
+1. `.harness/PROJECT_STATE.md` — master: where the project is.
+2. `.harness/CURRENT_TASK.md` — the one feature to work next.
+3. `.harness/ROADMAP.md` — all features + status + deps.
+4. the active `.harness/phases/PHASE-XX-*.md` — acceptance criteria.
+5. `.harness/DECISIONS.md` + `.harness/BLOCKERS.md`, then inspect the real code.
+
+Then obey `.harness/AGENTS.md`: one feature at a time, no victory without evidence, update the
+tracking files before you stop. `.harness/SESSION-CHECKLIST.md` is the per-session checklist;
+`.harness/ADOPTION.md` says whether this repo was adopted (pre-existing code) or greenfield.
+
+This file is only a pointer — do not duplicate the contract here; edit `.harness/AGENTS.md`.
+END>>>
+
+FILE: .github/copilot-instructions.md
+<<<BEGIN
+# GitHub Copilot — this repository runs on a build harness
+
+This repo is governed by a portable, closed-loop build **harness**. Its rules are tool-neutral
+and shared with every other agent via one canonical file.
+
+> **Canonical operating contract: `.harness/AGENTS.md`. Read it in full before doing anything,
+> and follow it even where it overrides your defaults.**
+
+Every session, read in order:
+1. `.harness/PROJECT_STATE.md` — master: where the project is.
+2. `.harness/CURRENT_TASK.md` — the one feature to work next.
+3. `.harness/ROADMAP.md` — all features + status + deps.
+4. the active `.harness/phases/PHASE-XX-*.md` — acceptance criteria.
+5. `.harness/DECISIONS.md` + `.harness/BLOCKERS.md`, then inspect the real code.
+
+Then obey `.harness/AGENTS.md`: one feature at a time, no victory without evidence, update the
+tracking files before you stop. `.harness/SESSION-CHECKLIST.md` is the per-session checklist;
+`.harness/ADOPTION.md` says whether this repo was adopted (pre-existing code) or greenfield.
+
+This file is only a pointer — do not duplicate the contract here; edit `.harness/AGENTS.md`.
+END>>>
+
+FILE: .cursor/rules/harness.mdc
+<<<BEGIN
+---
+description: Build harness operating contract — the canonical rules live in .harness/AGENTS.md
+alwaysApply: true
+---
+
+# Cursor — this repository runs on a build harness
+
+This repo is governed by a portable, closed-loop build **harness**. Its rules are tool-neutral
+and shared with every other agent via one canonical file.
+
+> **Canonical operating contract: `.harness/AGENTS.md`. Read it in full before doing anything,
+> and follow it even where it overrides your defaults.**
+
+Every session, read in order:
+1. `.harness/PROJECT_STATE.md` — master: where the project is.
+2. `.harness/CURRENT_TASK.md` — the one feature to work next.
+3. `.harness/ROADMAP.md` — all features + status + deps.
+4. the active `.harness/phases/PHASE-XX-*.md` — acceptance criteria.
+5. `.harness/DECISIONS.md` + `.harness/BLOCKERS.md`, then inspect the real code.
+
+Then obey `.harness/AGENTS.md`: one feature at a time, no victory without evidence, update the
+tracking files before you stop. `.harness/SESSION-CHECKLIST.md` is the per-session checklist;
+`.harness/ADOPTION.md` says whether this repo was adopted (pre-existing code) or greenfield.
+
+This file is only a pointer — do not duplicate the contract here; edit `.harness/AGENTS.md`.
+END>>>
+
+FILE: .windsurf/rules/harness.md
+<<<BEGIN
+---
+trigger: always_on
+---
+
+# Windsurf — this repository runs on a build harness
+
+This repo is governed by a portable, closed-loop build **harness**. Its rules are tool-neutral
+and shared with every other agent via one canonical file.
+
+> **Canonical operating contract: `.harness/AGENTS.md`. Read it in full before doing anything,
+> and follow it even where it overrides your defaults.**
+
+Every session, read in order:
+1. `.harness/PROJECT_STATE.md` — master: where the project is.
+2. `.harness/CURRENT_TASK.md` — the one feature to work next.
+3. `.harness/ROADMAP.md` — all features + status + deps.
+4. the active `.harness/phases/PHASE-XX-*.md` — acceptance criteria.
+5. `.harness/DECISIONS.md` + `.harness/BLOCKERS.md`, then inspect the real code.
+
+Then obey `.harness/AGENTS.md`: one feature at a time, no victory without evidence, update the
+tracking files before you stop. `.harness/SESSION-CHECKLIST.md` is the per-session checklist;
+`.harness/ADOPTION.md` says whether this repo was adopted (pre-existing code) or greenfield.
+
+This file is only a pointer — do not duplicate the contract here; edit `.harness/AGENTS.md`.
+END>>>
+
+FILE: .harness/ADOPTION.md
+<<<BEGIN
+# ADOPTION — existing-repo discovery
+
+Records how (and whether) this harness was attached to a pre-existing codebase. A cold agent
+reads this to know whether work marked `COMPLETE` was built under the loop or inherited. See
+`AGENTS.md` → "Mode".
+
+## Mode
+GREENFIELD — no pre-existing codebase was adopted; everything is built under the loop from F001.
+
+> In **Adopt** mode (an existing repo), replace this file with the discovery below, filled from
+> the real code, during the bootstrap's *Adopt procedure*.
+
+## Discovery (fill in Adopt mode; replace the GREENFIELD line above)
+- **Adopted on**: <date> — harness attached to an existing codebase.
+- **Stack / toolchain**: <languages, frameworks, package manager, test/build runners> — also
+  written to `SESSION-CHECKLIST.md` → Commands and `AGENTS.md` → Tech stack.
+- **Archetype**: <A full-stack / B DevOps-IaC / C Airflow / D docs-tooling-library> + why.
+- **Baseline at adoption**: <the repo's own suite: exact command -> result>. A green baseline is
+  the evidence for adopted `COMPLETE` features; red/missing is logged in `BLOCKERS.md` and
+  standing it up is the first task.
+- **Module map**: <top-level modules/packages and what each does> — feeds `MODULES.md`.
+- **Boundaries codified**: <the real import rules written into `rules/layer-boundaries.md`> plus
+  any existing violations recorded as debt in `BLOCKERS.md` (don't silently bless them).
+- **Reconstructed roadmap**: <which shipped capabilities became F0xx `COMPLETE`, and the next
+  `NOT STARTED` increment(s)>.
+- **Adopted vs. loop-verified**: every `COMPLETE` feature with evidence "adopted (pre-harness)"
+  was NOT built under the maker-checker loop. It is trusted only as far as the baseline suite
+  proves; changing it re-enters the full loop and must earn real evidence.
+
+## Gaps / risks found during adoption
+<missing tests, undocumented areas, boundary violations, dead code — triage each into
+`BLOCKERS.md` as debt or into `ROADMAP.md` as a future feature>
 END>>>
 
 FILE: .harness/loops/goal.md
@@ -454,7 +823,7 @@ feature (or slice) without babysitting.
 GOAL:        <one feature or slice, e.g. "F001 passes">
 DONE WHEN:   every acceptance item in the phase file for this feature is met
              AND evidence recorded AND Evaluator PASS (>=4.0, no 1s)
-VERIFY WITH: the FULL verify (CLAUDE.md → Commands: typecheck + lint + full test +
+VERIFY WITH: the FULL verify (SESSION-CHECKLIST.md → Commands: typecheck + lint + full test +
              check-architecture + e2e) + the feature's edge/error tests + its sprint-contract checks
 STOP AFTER:  15 turns  OR  90 minutes  OR  3 consecutive Evaluator REVISEs on the same defect
 CONSTRAINTS: obey scope-guard.md; one feature only (this lane's claimed feature); no new deps
@@ -479,6 +848,12 @@ ON STOP:     update ROADMAP.md + CHANGELOG.md + PROJECT_STATE.md, commit, report
   sprint contract.
 - If it stops on turns/time rather than success, that is useful data, not failure — it
   means the feature was mis-sized or blocked. Note which in PROJECT_STATE.md.
+
+## Native (Claude Code)
+`/goal <FID> done: every acceptance item has evidence in CHANGELOG.md and the evaluator
+subagent printed "Verdict: PASS" — or stop after 15 turns`. The goal judge sees only the
+transcript, so the condition names output the transcript will show. The loop above is the
+fallback for any other tool.
 END>>>
 
 FILE: .harness/loops/maker-checker-loop.md
@@ -512,7 +887,7 @@ Re-run every verification command yourself: the FULL suite (not a subset), check
 and the e2e test for any user-facing flow. Score against .harness/verification/evaluator-rubric.md.
 Check acceptance completeness, correctness (probe the applicable .harness/verification/edge-cases.md
 categories the Maker skipped; confirm error paths and no regression in COMPLETE features),
-boundary+scope compliance, modularity, evidence quality. Look for the skipped item, the empty
+boundary+scope compliance, modularity, evidence quality, simplicity. Look for the skipped item, the empty
 assertion, the boundary leak, the flaky/mocked-away e2e. Output: the scored block + verdict
 PASS|REVISE. On REVISE, list specific defects tied to acceptance items / rubric lines with the
 failing evidence. Do not fix code.
@@ -557,8 +932,9 @@ it gates moving to the next feature on a clean PR, not just a clean local run.
 after record (feature passed maker-checker):
   push branch to origin
   open a PR if none exists for this branch (reuse if one does — never open a second)
-  review the PR (code-review; a Checker-style pass over the diff, not self-grading)
-    CLEAN  -> enqueue this lane in LANES.md integration queue (loops/integration-loop.md)
+  review the PR (an independent code-review pass over the diff, not self-grading)
+  simplicity pass (a second, fresh-context pass — see Review)
+    CLEAN (both) -> enqueue this lane in LANES.md integration queue (loops/integration-loop.md)
     ISSUES -> fix (Maker) -> commit -> push (same branch/PR) -> review again
   if issues persist for MAX_PR_ROUNDS -> escalate to human with standing findings
 ```
@@ -583,9 +959,16 @@ follows the commit convention (`rules/conventions.md`). Body is the write-up at
 `gh pr list --head <branch>` before creating; if one is open, push updates to it instead.
 
 ### Review
-Run a Checker-style `code-review` pass against the branch/PR diff. Same principle as the
-Checker in `maker-checker-loop.md`: it must not just trust the Maker's summary of its own
-diff. Record findings in `.harness/reviews/<name>-review.md`.
+Run a Checker-style code-review pass against the branch/PR diff — whatever review capability
+your tool offers (a dedicated review command, a cold second agent, or a disciplined manual
+diff read). Same principle as the Checker in `maker-checker-loop.md`: it must not just trust
+the Maker's summary of its own diff. Record findings in `.harness/reviews/<name>-review.md`.
+
+### Simplicity pass
+A separate pass in a fresh context (not a bullet inside the review above) with one question:
+**what could be deleted or inlined and still pass acceptance?** It checks the diff against
+rubric criterion 6 and the sprint contract §6 budget. Findings go to
+`.harness/reviews/<name>-simplicity.md`; each is fixed or rebutted in one line.
 
 ### Fix
 Findings get addressed as the Maker, committed, and pushed to the same branch — never a new
@@ -612,6 +995,11 @@ Maker-checker already proves correctness + evidence locally. Doing the PR after 
 means every PR opened describes a feature already proven, not a WIP diff — the PR review is
 one more independent pass (real CI checks, a fresh look at the diff), not a substitute for
 the local one.
+
+## Native (Claude Code)
+Review = `/code-review` (standard) or `/code-review ultra` (deep, cloud). Simplicity pass =
+the `simplicity-reviewer` subagent (`.claude/agents/`). Both read the rubric from
+`.harness/verification/evaluator-rubric.md`; pass its path in the prompt.
 END>>>
 
 FILE: .harness/loops/parallel-loop.md
@@ -675,7 +1063,9 @@ claims the next ready feature or ends (worktree removed).
 - **Sequential**: a dependency chain — `F003 deps: F001` waits until F001 is *merged*, not just
   passed. Declared in `ROADMAP.md`; enforced by the ready set (`rules/scope-guard.md`).
 - **Serialize alone**: anything that must edit the shared/pure core. Give it the whole floor
-  (claim it when no other lane overlaps) rather than racing edits into the core.
+  (claim it when no other lane overlaps) rather than racing edits into the core. A wide
+  mechanical change (a rename, a migration across modules) is one `par: solo` feature, not
+  many lanes.
 
 ## Parameters (in `LANES.md`)
 - `MAX_LANES` — concurrent lanes (default 1 = off). Keep it <= the number of genuinely
@@ -687,6 +1077,13 @@ More lanes is not more throughput past the point where features stop being indep
 extra lane adds integration/rebase cost and conflict risk. Start at 2–3, raise only if the ready
 set is reliably that wide. Abnormal states (claim race, orphaned lane, cross-lane collision) are
 handled in `loops/failure-modes.md` → "Parallel lanes".
+
+## Native (Claude Code)
+Claim first (above — the ledger stays yours), then open the lane with `claude -w lane-<FID>`:
+worktree at `.claude/worktrees/lane-<FID>`, branch `worktree-lane-<FID>` — record that branch
+in `LANES.md`. `claude agents` is the lane dashboard; `/rename <FID>` names a session, `/bg`
+backgrounds it; hand-offs (lane -> Integrator) go as a cross-session message. A `par: solo`
+wide mechanical change runs as `/batch <instruction>` inside its one lane.
 END>>>
 
 FILE: .harness/loops/integration-loop.md
@@ -802,7 +1199,8 @@ continue at next interval unless disabled or an escalation fired
 ## Scheduling note
 Schedule this with a real recurring task (a scheduled task / cron), not an in-process timer,
 so it survives session end. It reads the same `.harness` state; it is just a different
-trigger.
+trigger. Claude Code: `/loop 30m <checks>` for the in-session heartbeat; `/schedule` for the
+daily checks (cloud, fresh clone, 1h minimum interval).
 
 ## What the heartbeat runs (make it real, not just typecheck)
 ```
@@ -1024,25 +1422,30 @@ above concurrently; only integration is serialized. Details: `loops/parallel-loo
 `loops/integration-loop.md`.
 
 ## Nodes
-| Node | Responsibility | Input | Output | Type |
-|---|---|---|---|---|
-| read-state | Load PROJECT_STATE, LANES, CURRENT_TASK, sprint contract; check start invariants | `.harness/*` | lane + active feature + context | code (deterministic) |
-| claim | Claim a ready feature by committing to `LANES.md` on `main`; create `lane/<FID>` worktree (parallel mode) | ready set, free slot | owned feature + worktree | code (deterministic, git-mutex) |
-| repair | Reconcile an abnormal start state (`loops/failure-modes.md`) | dirty tree / red init / bad lane invariants | clean, one-active-per-lane baseline | agent |
-| plan | Fix "done": write/confirm sprint contract (incl. lane ownership) | active feature, docs | signed sprint-contract | agent (Planner) |
-| implement | Build the thinnest step, produce evidence | sprint contract | code + evidence | agent (Maker) |
-| verify | Run typecheck, lint, FULL suite (regression gate), check-architecture, e2e; capture output | code | check results | code (deterministic) |
-| evaluate | Score against rubric, re-run checks | code + evidence + results | score + verdict | agent (Checker) |
-| record | Write evidence, set status passed | verdict PASS | updated ROADMAP + progress | code + agent |
-| push | Push branch to origin | committed evidence | branch on remote | code (deterministic) |
-| open-pr | Open PR if none exists, else reuse | branch on remote | PR number/url | code (deterministic) |
-| pr-review | Review the PR diff (code-review) | PR | findings or clean | agent (Checker) |
-| pr-fix | Address PR findings (and integration regressions) | findings | code + evidence | agent (Maker) |
-| enqueue | Add the lane to the `LANES.md` integration queue on a clean PR | clean PR | lane queued | code (deterministic) |
-| integrate | Merge queued lanes to `main` one at a time: rebase, full suite + e2e on integrated main, merge, release claim | queue | updated `main` | agent (Integrator) + code |
-| rollback | Revert to last clean commit on hard violation | dirty tree | clean tree | code (deterministic) |
-| handoff | Rewrite PROJECT_STATE, run clean-state checklist | slice complete | clean, documented repo | agent |
-| escalate | Stop and write a human-readable alert | blocker | alert in PROJECT_STATE | agent |
+| Node | Responsibility | Input | Output | Type | Model / effort |
+|---|---|---|---|---|---|
+| read-state | Load PROJECT_STATE, LANES, CURRENT_TASK, sprint contract; check start invariants | `.harness/*` | lane + active feature + context | code (deterministic) | — |
+| claim | Claim a ready feature by committing to `LANES.md` on `main`; create `lane/<FID>` worktree (parallel mode) | ready set, free slot | owned feature + worktree | code (deterministic, git-mutex) | — |
+| repair | Reconcile an abnormal start state (`loops/failure-modes.md`) | dirty tree / red init / bad lane invariants | clean, one-active-per-lane baseline | agent | sonnet / medium |
+| plan | Fix "done": write/confirm sprint contract (incl. lane ownership) | active feature, docs | signed sprint-contract | agent (Planner) | opus / high |
+| implement | Build the thinnest step, produce evidence | sprint contract | code + evidence | agent (Maker) | sonnet / medium |
+| verify | Run typecheck, lint, FULL suite (regression gate), check-architecture, e2e; capture output | code | check results | code (deterministic) | — |
+| evaluate | Score against rubric, re-run checks | code + evidence + results | score + verdict | agent (Checker) | opus / high |
+| record | Write evidence, set status passed | verdict PASS | updated ROADMAP + progress | code + agent | sonnet / low |
+| push | Push branch to origin | committed evidence | branch on remote | code (deterministic) | — |
+| open-pr | Open PR if none exists, else reuse | branch on remote | PR number/url | code (deterministic) | — |
+| pr-review | Review the PR diff: code-review pass + separate fresh-context simplicity pass | PR | findings or clean | agent (Checker) | opus / high |
+| pr-fix | Address PR findings (and integration regressions) | findings | code + evidence | agent (Maker) | sonnet / medium |
+| enqueue | Add the lane to the `LANES.md` integration queue on a clean PR | clean PR | lane queued | code (deterministic) | — |
+| integrate | Merge queued lanes to `main` one at a time: rebase, full suite + e2e on integrated main, merge, release claim | queue | updated `main` | agent (Integrator) + code | sonnet / medium |
+| rollback | Revert to last clean commit on hard violation | dirty tree | clean tree | code (deterministic) | — |
+| handoff | Rewrite PROJECT_STATE, run clean-state checklist | slice complete | clean, documented repo | agent | sonnet / low |
+| escalate | Stop and write a human-readable alert | blocker | alert in PROJECT_STATE | agent | sonnet / low |
+
+Model / effort is guidance with a default, not a rule: judgment nodes (plan, evaluate,
+pr-review) get the most capable tier at high effort; mechanical nodes a mid tier; broad
+read-only exploration the fastest tier; `—` nodes are deterministic code and need no model.
+Use tier aliases (`opus`/`sonnet`/`haiku` or your tool's equivalent), never pinned model ids.
 
 ## Edges
 | From | To | Type | Condition |
@@ -1166,7 +1569,7 @@ FILE: .harness/graph/graph.json
     { "id": "record",     "type": "code",  "does": "write evidence, mark feature passed" },
     { "id": "push",       "type": "code",  "does": "push branch to origin" },
     { "id": "open-pr",    "type": "code",  "does": "open PR if none exists, else reuse" },
-    { "id": "pr-review",  "type": "agent", "role": "Checker",   "does": "review PR diff (code-review)" },
+    { "id": "pr-review",  "type": "agent", "role": "Checker",   "does": "review PR diff: code-review pass + separate simplicity pass" },
     { "id": "pr-fix",     "type": "agent", "role": "Maker",     "does": "address PR findings and integration regressions, commit" },
     { "id": "enqueue",    "type": "code",  "does": "add the lane to the LANES.md integration queue on a clean PR" },
     { "id": "integrate",  "type": "agent", "role": "Integrator", "does": "merge queued lanes to main one at a time: rebase, full suite + e2e on integrated main, merge, release claim" },
@@ -1318,21 +1721,32 @@ scope guard (`rules/scope-guard.md`) respected?
 - 3: minor smell, no hard violation.
 - 1: a boundary violation, or out-of-scope work shipped.
 
-**4. Modularity** — Was this a registration, not a core edit, where MODULES.md says it
-should be?
-- 5: extension points used correctly; core untouched where it should be.
-- 3: works but a missed chance to use a registry.
-- 1: hard-coded into core what should have been modular.
+**4. Modularity (two-sided)** — Does the change fit the extension points that exist
+(`architecture/MODULES.md`) — no more, no less?
+- 5: used the listed registry where one applies; added no new extension point.
+- 3: missed a listed registry, OR added a seam whose second user is planned but not built.
+- 1: hard-coded into core what a listed registry already handles — OR invented an extension
+  point (registry, interface, plugin hook, base class) the current feature doesn't need.
+  Extension points are earned, not anticipated (`AGENTS.md` rule 6).
 
 **5. Evidence & handoff quality** — Can a cold agent reproduce the result and continue?
 - 5: exact commands/artifacts recorded; state + handoff updated.
 - 3: evidence present but handoff vague.
 - 1: no reproducible evidence, or state not updated.
 
+**6. Simplicity** — Is this the smallest change that satisfies the acceptance items? Check:
+an abstraction with one caller? a wrapper that only forwards? a config knob with one value?
+a pattern (factory, strategy, registry, adapter, base class, generic) before a second real
+case existed? new code that doesn't match its neighbors (`rules/conventions.md` → Readability
+& fit)?
+- 5: boring and obvious — a reader of the neighboring files would have written it this way.
+- 3: one unneeded layer/knob, trivially inlined.
+- 1: speculative generality shipped.
+
 ## Output format (the Evaluator writes this)
 ```
 Feature: <id>
-Scores: acceptance=_, correctness=_, boundaries=_, modularity=_, evidence=_  => avg _._
+Scores: acceptance=_, correctness=_, boundaries=_, modularity=_, evidence=_, simplicity=_  => avg _._
 Verdict: PASS | REVISE
 Defects (if REVISE):
   - [criterion] <specific defect> — <failing evidence> — <acceptance item it breaks>
@@ -1346,6 +1760,7 @@ Defects (if REVISE):
   disqualifying.
 - Probe the `edge-cases.md` categories the Generator skipped; a plausible failing input there
   is a correctness defect, not a nitpick.
+- Diff over the sprint contract's §6 budget with no written reason caps criterion 1 at 3.
 - Record the scored block in `CHANGELOG.md` as part of the evidence.
 END>>>
 
@@ -1494,7 +1909,9 @@ Depends on: <FIDs that must be COMPLETE **and merged to main** first, or "none">
 Date: <YYYY-MM-DD>
 
 > The Planner fills this before the Maker builds. Copy this template per feature. Nothing is
-> built until the contract exists and its acceptance maps to concrete checks.
+> built until the contract exists and its acceptance maps to concrete checks. For a vague
+> feature: "interview me until you could write this contract yourself — at most six
+> questions, no code." Write it read-only (plan mode, where the tool has one).
 
 ## 0. Lane ownership & parallel-safety (parallel mode)
 - Owned modules/paths (this lane may edit ONLY these): <list — must not overlap any other
@@ -1531,8 +1948,12 @@ word on why. An unconsidered applicable category is an incomplete contract.
 ## 5. Out of scope (parked, not built)
 <anything tempting that belongs to a later feature/phase — record it, don't build it>
 
-## 6. New dependencies (with justification)
-<none, or: dep — why the active feature needs it>
+## 6. Budget & fit
+- Expected diff: <N files, ~L lines> · owned modules: <paths> (always, not only parallel mode)
+- Neighbors matched: <2–3 existing files whose conventions this follows>
+- New dependency / abstraction / config surface: <none — or each one + the acceptance item
+  that needs it>
+- Over budget? <no — or the reason. The Evaluator reads it under rubric criterion 1.>
 
 ## 7. Risks
 <what could break; the edge/error paths the Checker should probe>
@@ -1613,24 +2034,24 @@ Structured logs (json) with `level`, `event`, `correlationId`, and relevant ids.
 process start, each layer boundary crossing (API in/out, job start/end), and every caught
 error with cause. See `scripts/SCRIPTS.md` → logger contract.
 
-## Session hygiene (do this before you stop, every time)
-1. Update `ROADMAP.md` (status + evidence).
-2. Append a dated entry to `CHANGELOG.md`.
-3. Rewrite `PROJECT_STATE.md` for a cold reader.
-4. Run `state/clean-state-checklist.md`. Leave the tree clean.
-5. Commit with the feature id.
-6. If the feature (or harness-only change) just went complete: push, open/reuse the PR,
-   review it, fix findings until clean (`loops/pr-review-loop.md`), then enqueue the lane for
-   integration (`loops/integration-loop.md`); release the claim once merged.
+## Session hygiene
+Before you stop, every time: `AGENTS.md` → Session-completion protocol, then
+`state/clean-state-checklist.md`.
 
 ## Comments & docs
 Comment *why*, not *what*. Update the affected `.harness` doc in the same change that makes
 it stale (e.g. new endpoint -> update API_SURFACE.md). Stale docs are worse than none.
 
-## Definition of "modular"
-Before adding a capability, check `architecture/MODULES.md`: can this be a registration
-instead of a core edit? If yes, do that. If it forces a core change, either the abstraction
-is missing (add it) or the change is genuinely core (justify it in the sprint contract).
+## Readability & fit
+- New code matches the files around it: naming, layout, error handling, test style. Don't
+  bring in a pattern the repo doesn't already use for one feature.
+- Read 2–3 neighboring files before writing a new one; name them in sprint contract §6.
+- A longer function with a clear name beats three indirected ones.
+- No new dependency, abstraction layer, or config surface without a §6 line tying it to an
+  acceptance item.
+- Delete-first: if the change can be made by removing code, do that.
+- Extension points: use the ones in `architecture/MODULES.md`; add one only on the third
+  occurrence (`AGENTS.md` rule 6).
 END>>>
 
 FILE: .harness/rules/scope-guard.md
@@ -1656,8 +2077,8 @@ temptation and parks it. Keep this list in sync with ROADMAP.md.>>
    future feature in `ROADMAP.md`) and keep going on the active feature.
 2. No dependency unless the active feature needs it — record new deps in the sprint contract
    with a justification.
-3. Design *for* later phases (stable ids, registries, interfaces) but *build* only the
-   current phase.
+3. Keep ids stable. Don't build seams for later phases — they earn their own (`AGENTS.md`
+   rule 6). Build only the current phase.
 4. If scope is wrong, propose an edit to this file + `ROADMAP.md` — don't silently expand.
    Record the decision in `DECISIONS.md`.
 5. Don't skip a phase's completion criteria. A phase is done only when every feature is
@@ -1748,7 +2169,14 @@ FILE: .harness/scripts/SCRIPTS.md
 These are **contracts, not code** (this harness ships no code). Each script is specified by
 purpose, inputs, behavior, output, and exit code. The first build session implements them as
 real scripts under `scripts/` at the repo root and wires them into the commands in
-`CLAUDE.md`. The Evaluator verifies each implementation against its contract.
+`SESSION-CHECKLIST.md`. The Evaluator verifies each implementation against its contract.
+
+The commands are **tool-neutral** — any agent runs them the same way; they wrap the repo's own
+toolchain (`SESSION-CHECKLIST.md` → Commands), not a vendor feature. **In Adopt mode** (an
+existing repo), reuse what already exists: the repo's own install/test/build become the
+Commands, and its existing passing suite is the `init` baseline — only write the thin
+`check-architecture` / `e2e` wrappers that are genuinely missing; don't duplicate a working
+test runner.
 
 Convention for all: exit `0` = success, non-zero = failure with a human-readable reason on
 stderr. Structured (json) logs on stdout where noted. No script mutates `.harness/` rule
@@ -1827,13 +2255,20 @@ files.
 - **Output**: a table: features attempted, passed-with-evidence, violations, rounds used.
 - **Exit**: `0` when the run completes (pass/fail is in the report, not the exit code).
 - **Used by**: periodic health/ablation checks, not the build loop.
+- **Mechanism (Claude Code)**: `claude plugin eval` with the harness installer plugin. Each
+  case is `evals/<case>/prompt.md` + `graders/`; it runs every prompt with and without the
+  plugin, and the WITH − W/OUT gap is the harness's value. `/usage` and `/insights` show where
+  real sessions spend and fail.
 
 ## cleanup-scanner
 - **Purpose**: keep quality maintainable between sessions.
 - **Inputs**: the source tree.
 - **Behavior**: report dead code, unused deps/exports, TODOs that imply out-of-scope work,
   files over the size guideline, and `.harness` docs that are stale relative to the code they
-  describe.
+  describe. Plus the speculative-generality set (rubric criterion 6): interfaces/abstract
+  types with one implementation, wrappers that only delegate, exported symbols with one
+  internal caller, config entries never read with more than one value, and files that diverge
+  from the conventions of their directory.
 - **Output**: a findings list, grouped by severity. Report-only — never auto-edits.
 - **Exit**: `0` always (advisory); findings go to the timer loop's report policy.
 - **Used by**: the daily timer loop.
@@ -1968,13 +2403,17 @@ FILE: .harness/RUNTIME-CONTINUITY.md
 Keep building without interruption when one agent runtime hits its usage/session limit, by
 failing over to another. This works because **the harness is the source of truth, not the
 conversation** — any runtime resumes from `PROJECT_STATE.md`. It applies multi-session
-continuity across *tools*, not just sessions.
+continuity across *tools*, not just sessions. Because the harness is LLM-agnostic (one contract
+behind every tool's entry file), the two runtimes can be **different vendors** — the failover
+reads the same `.harness/AGENTS.md` and continues the same feature.
 
 ## The runtimes
+Pick any two agent CLIs/IDEs you have access to (e.g. Claude Code, Gemini CLI / Antigravity,
+GitHub Copilot, Cursor, Codex/ChatGPT, Grok). They need not be the same vendor.
 | Runtime | Launch (in the repo) | Role |
 |---|---|---|
-| <<FILL: primary CLI, e.g. `claude`>> | in the repo root | Primary — where you start |
-| <<FILL: failover CLI>> | in the repo root | Failover |
+| <<FILL: primary agent, e.g. `claude` / `gemini` / Cursor>> | in the repo root | Primary — where you start |
+| <<FILL: failover agent (any other tool)>> | in the repo root | Failover |
 
 <<FILL: any install/auth one-liners for the failover runtime.>>
 
@@ -2194,7 +2633,7 @@ Evidence:
   - full suite: <command> -> <N passed, 0 failed> (no regressions)
   - e2e: <command> -> <scenarios passed / N-A not user-facing> (trace: .harness/evidence/<FID>/)
   - edge cases: <the applicable edge-cases.md categories covered, by test>
-Evaluator: acceptance=_ correctness=_ boundaries=_ modularity=_ evidence=_ => avg _._  (PASS)
+Evaluator: acceptance=_ correctness=_ boundaries=_ modularity=_ evidence=_ simplicity=_ => avg _._  (PASS)
 Notes: <anything the next agent should know>
 ```
 
@@ -2335,7 +2774,7 @@ the loop still runs.
 - Boundaries: domain imports no framework/ORM/HTTP; UI never imports persistence; UI mutates
   via a command layer; local state holds no server truth; ORM only in the server.
 - Arch files: ARCHITECTURE + DATA_MODEL + API_SURFACE + MODULES all apply.
-- Registries (MODULES): object/view kinds, importers, exporters, actions.
+- Seams, once earned (rule 6): object/view kinds, importers, exporters, actions.
 - E2E: a user flow driven UI -> API -> DB -> back.
 
 ## B. DevOps / IaC / platform tooling (Terraform, K8s, CLIs, pipelines)
@@ -2346,7 +2785,7 @@ the loop still runs.
   dry-run/plan path exists for every apply.
 - Arch files: ARCHITECTURE + MODULES apply; DATA_MODEL / API_SURFACE usually **N/A** (delete or
   mark N/A). Add an ENVIRONMENTS.md if you manage several.
-- Registries (MODULES): providers/targets, resource types, policy checks.
+- Seams, once earned (rule 6): providers/targets, resource types, policy checks.
 - E2E: a real (ephemeral/sandbox) plan -> apply -> verify -> destroy, or a plan asserted against
   a golden output.
 
@@ -2358,15 +2797,33 @@ the loop still runs.
   connections/vars, never inline; every task idempotent + safely backfillable.
 - Arch files: ARCHITECTURE + DATA_MODEL (schemas/contracts) + MODULES apply; API_SURFACE usually
   **N/A**.
-- Registries (MODULES): source/sink connectors, transform steps, data-quality checks.
+- Seams, once earned (rule 6): source/sink connectors, transform steps, data-quality checks.
 - E2E: a DAG run against seeded inputs asserting outputs + a data-quality gate. Edge cases
   (`verification/edge-cases.md`) map to late/duplicate/out-of-order data, partial failure,
   backfill.
 
+## D. Docs / CLI tooling / library / single-artifact distribution
+- For repos whose "product" is text, a spec, a template, a CLI, or a published package rather
+  than a running service (e.g. a docs site, a scaffolder, an SDK, a prompt/spec distributed as
+  one file). Layers: the published artifact(s) -> a pure generation/validation core -> thin
+  I/O (file writes, packaging). No server/DB.
+- Boundaries: the core (what the artifact *means* + how it's validated) is pure and testable
+  with no filesystem/network; I/O lives at the edge; the published artifact is reproducible
+  from source; no secrets/credentials in the artifact; idempotent generation (re-running
+  doesn't corrupt output).
+- Arch files: ARCHITECTURE + MODULES apply; DATA_MODEL / API_SURFACE usually **N/A** (mark so).
+- Seams, once earned (rule 6): output targets/formats, validation checks, template blocks.
+- E2E: generate into a scratch/sandbox location and assert the artifact is well-formed +
+  complete (for a scaffolder: scaffold → run its own self-check → assert zero leaks); for a
+  library, the public API exercised through its published entry point. Edge cases map to
+  partial/interrupted generation, re-run over existing output, malformed input.
+
 ## Pick and adapt
 Match the closest archetype, delete the arch files that don't apply, and phrase each boundary
 so `check-architecture` can decide it. When none fit, keep the invariant (pure shared core,
-mechanically-checkable boundaries) and write the layers your project actually has.
+mechanically-checkable boundaries) and write the layers your project actually has. **In Adopt
+mode**, derive the layers + boundaries from the structure the code *already* has — don't impose
+a shape it doesn't follow; record real violations as debt in `BLOCKERS.md`.
 END>>>
 
 FILE: .harness/architecture/ARCHITECTURE.md
@@ -2408,13 +2865,12 @@ END>>>
 
 FILE: .harness/architecture/MODULES.md
 <<<BEGIN
-# MODULES — the extension points
+# MODULES — the extension points that exist
 
-<<FILL: the registries/interfaces that new variants register against instead of editing the
-core (new types, importers, exporters, actions, view kinds…). This is what
-evaluator-rubric.md criterion 4 (modularity) and layer-boundaries.md rule "registries, not
-switches" check against. If adding a feature forces a core edit that a registry should
-handle, the abstraction is wrong.>>
+<<FILL: only the registries/interfaces the code already has: file, how a variant registers,
+current registrants. Greenfield starts empty. A new one is added here only when `AGENTS.md`
+rule 6 earns it (third occurrence + a `DECISIONS.md` entry). evaluator-rubric.md criterion 4
+checks both ways: bypassing a listed point is a defect; adding an unlisted one is too.>>
 END>>>
 
 FILE: .harness/phases/PHASE-01-FOUNDATION.md
@@ -2435,7 +2891,7 @@ Evaluator scores against — the same items the sprint contract maps to concrete
 - [ ] Edge/error cases from `verification/edge-cases.md` (applicable ones) covered by tests.
 - [ ] E2E: primary user flow passes end-to-end (or "N/A — not user-facing").
 - [ ] Boundary invariants: obeys `rules/layer-boundaries.md` (check-architecture passes).
-- [ ] Verification: the FULL verify (CLAUDE.md → Commands, incl. e2e) passes with zero errors,
+- [ ] Verification: the FULL verify (SESSION-CHECKLIST.md → Commands, incl. e2e) passes with zero errors,
       no regressions — and, in parallel mode, green on the integrated `main` after merge.
 
 ### Evidence expected
@@ -2447,22 +2903,614 @@ before Phase 02 starts.
 END>>>
 
 ═══════════════════════════════════════════════════════════════════════════════════════
+         OPTIONAL — CLAUDE CODE LAYER (.claude/) — other agents: skip this section
+═══════════════════════════════════════════════════════════════════════════════════════
+
+These 16 files make Claude Code enforce rules the markdown above already states: permissions
+(the floor), hooks (session-completion protocol, the commit and `COMPLETE` gates, the machinery
+guard, state injected at session start and after compaction), skills for the repeated
+procedures, and subagents so the Checker runs in its own context (`verification/roles.md`).
+They add no rules. Skip this section and the harness is complete; scaffold it and
+`.claude/README.md` maps each piece to the rule it enforces. Scaffolding rules here: if
+`.claude/settings.json` exists, merge `permissions` + `hooks` into it instead of overwriting;
+add `.claude/settings.local.json` and `.claude/worktrees/` to `.gitignore`. Hooks need `bash`
+and `jq`.
+
+FILE: .claude/settings.json
+<<<BEGIN
+{
+  "$schema": "https://json.schemastore.org/claude-code-settings.json",
+  "permissions": {
+    "deny": [
+      "Read(**/.env)",
+      "Read(**/.env.*)",
+      "Read(**/secrets/**)",
+      "Read(**/*.pem)",
+      "Read(**/*.key)",
+      "Bash(git push --force *)",
+      "Bash(git push --force-with-lease *)",
+      "Bash(git push -f *)"
+    ],
+    "ask": [
+      "Bash(git reset --hard *)",
+      "Bash(git clean *)",
+      "Bash(git restore *)",
+      "Bash(git checkout -- *)",
+      "Bash(git branch -D *)",
+      "Bash(git rebase *)",
+      "Bash(git worktree remove *)",
+      "Bash(rm -rf *)"
+    ],
+    "allow": [
+      "Bash(git status *)",
+      "Bash(git diff *)",
+      "Bash(git log *)",
+      "Bash(git show *)",
+      "Bash(git add *)",
+      "Bash(git commit *)",
+      "Bash(git switch *)",
+      "Bash(git fetch *)",
+      "Bash(git pull --rebase *)",
+      "Bash(git push -u origin *)",
+      "Bash(git worktree add *)",
+      "Bash(git worktree list *)",
+      "Bash(gh pr list *)",
+      "Bash(gh pr view *)",
+      "Bash(gh pr create *)",
+      "Bash(gh pr checks *)",
+      "Bash(./scripts/*)"
+    ]
+  },
+  "hooks": {
+    "SessionStart": [
+      { "hooks": [{ "type": "command", "command": "bash \"$CLAUDE_PROJECT_DIR/.claude/hooks/session-start.sh\"" }] }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "Bash|Edit|Write|MultiEdit",
+        "hooks": [{ "type": "command", "command": "bash \"$CLAUDE_PROJECT_DIR/.claude/hooks/pre-tool.sh\"", "timeout": 900 }]
+      }
+    ],
+    "Stop": [
+      { "hooks": [{ "type": "command", "command": "bash \"$CLAUDE_PROJECT_DIR/.claude/hooks/stop.sh\"" }] }
+    ]
+  }
+}
+END>>>
+
+FILE: .claude/README.md
+<<<BEGIN
+# .claude/ — optional Claude Code layer for the harness
+
+This folder makes Claude Code enforce rules `.harness/AGENTS.md` already states. It adds no new
+rules. Delete it and the harness still works: the markdown is the source of truth.
+
+## The deny list is the floor, not the rulebook
+`settings.json` → `permissions.deny` holds only what no rule should ever bend: reading `.env`,
+secrets and keys, and force pushes. Most rules stay in markdown, where the model weighs them.
+Deny rules match command text, so they are partial for Bash (`git -C . push --force`, a script
+that opens `.env`). The hooks back them up; for OS-level enforcement, use sandboxing.
+`ask` covers destructive git. `allow` covers routine git/gh so auto mode stops prompting —
+**add your Commands table (`.harness/SESSION-CHECKLIST.md`) here**, e.g. `"Bash(npm test *)"`.
+
+## Hooks → rules
+| Hook | Does | Rule |
+|---|---|---|
+| `session-start.sh` | prints PROJECT_STATE + CURRENT_TASK into context at startup/resume/clear/compact | 1 |
+| `pre-tool.sh` | blocks `git commit` while the "Test (full suite)" command is red | 3, conventions Git |
+| `pre-tool.sh` | blocks adding `COMPLETE` to ROADMAP/phases while "Check boundaries" is red | 3, 4 |
+| `pre-tool.sh` | blocks machinery edits on `feat/*`, `lane/*`, `worktree-lane-*` branches | never edit rules to pass |
+| `pre-tool.sh` | blocks any force push | conventions Git |
+| `stop.sh` | blocks stopping when code changed but PROJECT_STATE / CURRENT_TASK / CHANGELOG didn't, or a feature is newly `COMPLETE` with no `Evidence:` in CHANGELOG | 3, 8 |
+
+Gates read their commands from `SESSION-CHECKLIST.md` → Commands. A `<placeholder>` there skips
+the gate. A green run is cached per tree state in `.git/harness/`, so re-committing the same
+tree doesn't re-run the suite. The Stop hook nudges once per stop (`stop_hook_active`), then
+lets Claude stop. Needs `bash` + `jq`. Turn hooks off for a session: `HARNESS_HOOKS=off claude`.
+
+## Also here
+- `skills/` — `/harness-start`, `/harness-feature`, `/harness-verify`, `/harness-record` and
+  `/harness-lane` (the last two run only when you ask).
+- `agents/` — `evaluator`, `simplicity-reviewer`, `integrator`: fresh contexts, per
+  `.harness/verification/roles.md`.
+- `rules/` — context discipline (always loaded); `.harness/` and test guidance (loaded by path).
+
+Git-ignore `.claude/settings.local.json` and `.claude/worktrees/`.
+END>>>
+
+FILE: .claude/hooks/session-start.sh
+<<<BEGIN
+#!/usr/bin/env bash
+# SessionStart (startup | resume | clear | compact): print harness state into Claude's context,
+# so a fresh or compacted session starts from disk, not memory (AGENTS.md rule 1).
+# Also records the commit this session started from; stop.sh diffs against it.
+set -u
+input=$(cat)
+[ "${HARNESS_HOOKS:-on}" = off ] && exit 0
+root=$(git rev-parse --show-toplevel 2>/dev/null) || exit 0
+cd "$root" || exit 0
+[ -f .harness/PROJECT_STATE.md ] || exit 0
+
+source=$(printf '%s' "$input" | jq -r '.source // "startup"' 2>/dev/null || echo startup)
+state_dir="$(git rev-parse --git-dir)/harness"
+mkdir -p "$state_dir"
+# resume/compact continue the same session: keep its original base.
+if [ "$source" = startup ] || [ "$source" = clear ] || [ ! -s "$state_dir/base" ]; then
+  git rev-parse HEAD 2>/dev/null > "$state_dir/base" || : > "$state_dir/base"
+fi
+
+{
+  echo "## Harness state (injected from .harness/ at $source)"
+  awk '/^## Where we are/{f=1} /^## Lanes/{f=0} f' .harness/PROJECT_STATE.md
+  awk '/^## Next step/{f=1} /^## Open blockers/{f=0} f' .harness/PROJECT_STATE.md
+  echo "### CURRENT_TASK.md (head)"
+  sed -n '1,25p' .harness/CURRENT_TASK.md
+  echo "### git"
+  echo "branch $(git branch --show-current 2>/dev/null), $(git status --porcelain | wc -l | tr -d ' ') uncommitted path(s)"
+  echo "Contract: .harness/AGENTS.md. Full init + repair: /harness-start."
+} | head -n 60
+exit 0
+END>>>
+
+FILE: .claude/hooks/stop.sh
+<<<BEGIN
+#!/usr/bin/env bash
+# Stop gate: AGENTS.md session-completion protocol (rule 8) + "no victory without evidence"
+# (rule 3). Exit 2 blocks the stop; stderr tells Claude exactly what is missing.
+# One nudge per stop: if Claude is already continuing because of this hook, let it stop.
+set -u
+input=$(cat)
+[ "$(printf '%s' "$input" | jq -r '.stop_hook_active // false' 2>/dev/null)" = true ] && exit 0
+[ "${HARNESS_HOOKS:-on}" = off ] && exit 0
+root=$(git rev-parse --show-toplevel 2>/dev/null) || exit 0
+cd "$root" || exit 0
+[ -f .harness/PROJECT_STATE.md ] || exit 0
+
+base=$(cat "$(git rev-parse --git-dir)/harness/base" 2>/dev/null || true)
+[ -n "$base" ] || base=$(git rev-parse HEAD 2>/dev/null) || exit 0   # no commits yet: nothing to diff
+
+# Everything that differs from the session's start: commits since base, uncommitted, untracked.
+changed=$( { git diff --name-only "$base" 2>/dev/null; git ls-files --others --exclude-standard; } | sort -u)
+problems=""
+
+# 1. Code changed this session for an in-progress feature, but the tracking files didn't.
+code_changed=$(printf '%s\n' "$changed" | grep -v -e '^\.harness/' -e '^\.claude/' -e '^$' || true)
+if [ -n "$code_changed" ] && grep -Eq '^[[:space:]]*- \[[ x]\].*IN PROGRESS' .harness/ROADMAP.md 2>/dev/null; then
+  stale=""
+  for f in PROJECT_STATE.md CURRENT_TASK.md CHANGELOG.md; do
+    printf '%s\n' "$changed" | grep -qx ".harness/$f" || stale="$stale .harness/$f"
+  done
+  if [ -n "$stale" ]; then
+    dirty=""
+    [ -n "$(git status --porcelain)" ] && dirty=" Working tree is dirty: commit, or stash to wip/<date> per loops/failure-modes.md."
+    problems="${problems}- Code changed this session but not updated:${stale}. Run AGENTS.md → Session-completion protocol.${dirty}
+"
+  fi
+fi
+
+# 2. A feature newly marked COMPLETE needs a CHANGELOG entry with an Evidence: line.
+for fid in $(git diff "$base" -- .harness/ROADMAP.md 2>/dev/null | grep -E '^\+.*COMPLETE' | grep -oE 'F[0-9]{3,}' | sort -u); do
+  if ! awk -v id="$fid" '/^## /{e=(index($0, id) && index($0, "COMPLETE"))} e && /^Evidence:/{ok=1} END{exit !ok}' .harness/CHANGELOG.md; then
+    problems="${problems}- $fid is marked COMPLETE in ROADMAP.md but .harness/CHANGELOG.md has no '## … $fid … COMPLETE' entry with an Evidence: line (verification/acceptance-evidence.md).
+"
+  fi
+done
+
+[ -z "$problems" ] && exit 0
+printf 'harness: not ready to stop.\n%s' "$problems" >&2
+exit 2
+END>>>
+
+FILE: .claude/hooks/pre-tool.sh
+<<<BEGIN
+#!/usr/bin/env bash
+# PreToolUse gate (Bash | Edit | Write | MultiEdit). Exit 2 blocks the tool; stderr says why.
+#   git commit while the full suite is red                 -> rule 3, conventions.md "Git"
+#   adding COMPLETE to ROADMAP/phases while boundaries red -> rules 3 + 4
+#   editing harness machinery on a feature/lane branch     -> "never edit .harness rules to pass"
+#   any force push                                         -> conventions.md "Git"
+set -u
+input=$(cat)
+[ "${HARNESS_HOOKS:-on}" = off ] && exit 0
+start_dir=$PWD
+root=$(git rev-parse --show-toplevel 2>/dev/null) || exit 0
+root=$(cd "$root" && pwd -P)
+cd "$root" || exit 0
+[ -f .harness/AGENTS.md ] || exit 0
+
+block() { echo "harness: $1" >&2; exit 2; }
+
+# The command in a SESSION-CHECKLIST.md Commands row, e.g. "Test (full suite)".
+command_for() {
+  grep -F "| $1 |" .harness/SESSION-CHECKLIST.md | head -n 1 | sed -E 's/^[^`]*`([^`]*)`.*/\1/'
+}
+
+# Run a Commands row; block with its output tail if red. Green is cached per tree state.
+run_gate() {
+  local row=$1 action=$2 cmd key stamp out
+  cmd=$(command_for "$row")
+  case "$cmd" in
+    '' | '<'*) echo "harness: '$row' not set in SESSION-CHECKLIST.md — gate skipped" >&2; return 0 ;;
+  esac
+  key=$( { git rev-parse HEAD 2>/dev/null; git diff HEAD 2>/dev/null
+           git ls-files --others --exclude-standard -z | xargs -0 shasum 2>/dev/null; } | shasum | cut -c1-40)
+  stamp="$(git rev-parse --git-dir)/harness/green-$(printf '%s' "$row" | tr -c 'A-Za-z' '_')"
+  [ "$(cat "$stamp" 2>/dev/null)" = "$key" ] && return 0
+  if out=$(bash -c "$cmd" 2>&1); then
+    mkdir -p "$(dirname "$stamp")" && echo "$key" > "$stamp"
+    return 0
+  fi
+  block "$action blocked — '$row' is red ($cmd):
+$(printf '%s\n' "$out" | tail -n 20)"
+}
+
+tool=$(printf '%s' "$input" | jq -r '.tool_name // ""')
+ws='[[:space:]]'
+git_cmd="(^|[;&|(]|$ws)git($ws+-C$ws+[^[:space:]]+)?$ws+"
+
+if [ "$tool" = Bash ]; then
+  cmd=$(printf '%s' "$input" | jq -r '.tool_input.command // ""')
+  if printf '%s' "$cmd" | grep -Eq "${git_cmd}push($ws.*)?$ws(--force[a-z-]*|-f|\+[^[:space:]]+)($ws|=|\$)"; then
+    block "force push is never allowed (rules/conventions.md → Git). Merge the default branch in instead of rebasing a pushed branch."
+  fi
+  if printf '%s' "$cmd" | grep -Eq "${git_cmd}commit($ws|\$)"; then
+    run_gate "Test (full suite)" "git commit"
+  fi
+  exit 0
+fi
+
+path=$(printf '%s' "$input" | jq -r '.tool_input.file_path // ""')
+case "$path" in /*) ;; *) path="$start_dir/$path" ;; esac
+# Resolve symlinks (e.g. /var -> /private/var) via the nearest existing directory.
+dir=$(dirname "$path"); while [ ! -d "$dir" ]; do dir=$(dirname "$dir"); done
+rel=$(cd "$dir" && pwd -P)${path#"$dir"}
+rel=${rel#"$root"/}
+case "$tool" in
+  Edit)      old=$(printf '%s' "$input" | jq -r '.tool_input.old_string // ""')
+             new=$(printf '%s' "$input" | jq -r '.tool_input.new_string // ""') ;;
+  MultiEdit) old=$(printf '%s' "$input" | jq -r '[.tool_input.edits[]?.old_string] | join("\n")')
+             new=$(printf '%s' "$input" | jq -r '[.tool_input.edits[]?.new_string] | join("\n")') ;;
+  Write)     old=$(cat "$rel" 2>/dev/null || true)
+             new=$(printf '%s' "$input" | jq -r '.tool_input.content // ""') ;;
+  *)         exit 0 ;;
+esac
+
+case "$(git branch --show-current 2>/dev/null)" in
+  feat/* | lane/* | worktree-lane-*)
+    case "$rel" in
+      .harness/loops/loop-state.md | .harness/verification/sprint-contract.md) ;;  # per-feature files
+      .harness/AGENTS.md | .harness/README.md | .harness/SESSION-CHECKLIST.md | \
+      .harness/RUNTIME-CONTINUITY.md | .harness/loops/* | .harness/graph/* | \
+      .harness/verification/* | .harness/rules/conventions.md | .harness/scripts/* | \
+      .harness/state/* | .harness/architecture/ARCHETYPES.md | .harness/architecture/decisions/ADR-template.md | \
+      .claude/settings.json | .claude/hooks/* | .claude/agents/* | .claude/skills/* | .claude/rules/*)
+        block "$rel is harness machinery; don't change the rules during a feature. Use a chore/harness-<slug> branch." ;;
+    esac ;;
+esac
+
+case "$rel" in
+  .harness/ROADMAP.md | .harness/phases/*.md)
+    if [ "$(printf '%s' "$new" | grep -o COMPLETE | wc -l)" -gt "$(printf '%s' "$old" | grep -o COMPLETE | wc -l)" ]; then
+      run_gate "Check boundaries" "marking a feature COMPLETE"
+    fi ;;
+esac
+exit 0
+END>>>
+
+FILE: .claude/rules/context.md
+<<<BEGIN
+# Context discipline (Claude Code)
+
+- The harness writes state to disk because context doesn't survive. After compaction or
+  `/clear`, the SessionStart hook re-prints PROJECT_STATE + CURRENT_TASK. Everything else is
+  re-read from `.harness/` when a step needs it.
+- A feature boundary is a context boundary: `/clear` after `/harness-record`, before the next
+  feature. Don't carry one feature's reasoning into the next.
+- `/context` shows what is loaded. Read loops/graph/verification docs when a step needs them,
+  not all up front.
+- Anything a later session needs goes into a tracking file before you stop, not into chat.
+- Skills: `/harness-start`, `/harness-feature`, `/harness-verify`; the user runs
+  `/harness-record` and `/harness-lane`.
+END>>>
+
+FILE: .claude/rules/harness-files.md
+<<<BEGIN
+---
+paths:
+  - ".harness/**"
+---
+
+# Editing .harness/
+
+- **Machinery** — the rules. Never edit them to make a check pass; change them only on a
+  `chore/harness-<slug>` branch (the PreToolUse hook enforces this on feature/lane branches):
+  `AGENTS.md`, `README.md`, `SESSION-CHECKLIST.md`, `RUNTIME-CONTINUITY.md`, `loops/*` (not
+  `loop-state.md`), `graph/*`, `verification/*` (not the sprint contract), `rules/conventions.md`,
+  `scripts/*`, `state/*`, `architecture/ARCHETYPES.md`, `architecture/decisions/ADR-template.md`.
+- **Tracking** — update every session (`AGENTS.md` → Session-completion protocol):
+  `PROJECT_STATE`, `CURRENT_TASK`, `ROADMAP` + `phases/`, `CHANGELOG`, `DECISIONS`, `BLOCKERS`,
+  `LANES`, `loops/loop-state.md`.
+- Statuses: only `NOT STARTED` · `IN PROGRESS` · `BLOCKED` · `IN REVIEW` · `COMPLETE` ·
+  `DEPRECATED`.
+- `COMPLETE` needs a CHANGELOG entry with an `Evidence:` line (Stop hook) and check-architecture
+  green (PreToolUse hook).
+END>>>
+
+FILE: .claude/rules/tests.md
+<<<BEGIN
+---
+paths:
+  - "**/*.test.*"
+  - "**/*.spec.*"
+  - "**/*_test.*"
+  - "**/test_*.py"
+  - "**/tests/**"
+  - "**/e2e/**"
+---
+
+# Writing tests
+
+- Cover the `.harness/verification/edge-cases.md` categories that sprint contract §2 names, each
+  with a test that asserts real behavior.
+- A user-facing flow gets an e2e test against the real stack
+  (`.harness/verification/acceptance-evidence.md`): deterministic, seeded, no sleep-and-hope.
+- No `assert true`, no skipped test, no test edited to pass. Flaky is broken — fix the cause.
+- Match the existing tests' style, helpers and layout before adding new ones.
+END>>>
+
+FILE: .claude/skills/harness-start/SKILL.md
+<<<BEGIN
+---
+name: harness-start
+description: Use at the start of a session in a repo with a .harness/ folder, after /clear, or when asked to resume, re-check, or repair harness state. Finishes the read order, runs init, and routes abnormal start states to failure-modes.
+allowed-tools: Read, Grep, Glob, Bash(git status *), Bash(git log *), Bash(git branch *), Bash(./scripts/init.sh)
+effort: low
+---
+
+# Harness start
+
+The SessionStart hook already printed PROJECT_STATE + CURRENT_TASK. Do the rest of
+`.harness/SESSION-CHECKLIST.md` → "On session start":
+
+1. Read the active phase file (`.harness/phases/`) for the current feature, then
+   `DECISIONS.md` + `BLOCKERS.md`. If `MAX_LANES > 1` in `LANES.md`, read it and name your lane.
+2. Run `init` (`SESSION-CHECKLIST.md` → Commands → Verify baseline). Not implemented yet? Say
+   so and run the "Test (full suite)" command instead.
+3. Check `state/clean-state-checklist.md` → "Before starting work". Anything fails → follow
+   `loops/failure-modes.md` → "At session start" before any feature work.
+4. Inspect the code the current task touches. If it disagrees with the tracking files, the
+   code wins: correct the files and note it in `CHANGELOG.md`.
+5. Report in at most five lines: feature, exact next step, baseline green/red, what you repaired.
+END>>>
+
+FILE: .claude/skills/harness-feature/SKILL.md
+<<<BEGIN
+---
+name: harness-feature
+description: Use when starting, planning, or continuing the harness's active feature (the F0xx id in .harness/CURRENT_TASK.md) — sprint contract first, then implement, then harness-verify. Not for editing harness machinery.
+allowed-tools: Read, Grep, Glob, Bash(git status *), Bash(git diff *), Bash(git switch *)
+effort: high
+---
+
+# Harness feature — contract → implement → verify
+
+Work only the feature in `.harness/CURRENT_TASK.md` (rule 2), on `feat/<FID>` or your lane's
+branch.
+
+## 1. Contract (Planner), in plan mode
+- No signed contract for this FID yet: enter plan mode and fill the template in
+  `.harness/verification/sprint-contract.md` from the phase file. Vague acceptance: interview
+  the user until you could write the contract yourself — at most six questions, no code.
+- §2 from `verification/edge-cases.md`. §6: expected files and lines, owned modules, the 2–3
+  neighboring files you read and will match, and every new dependency, abstraction or config
+  tied to an acceptance item (default: none).
+- The contract is the plan. Once it's approved, write it to disk.
+
+## 2. Implement (Maker)
+- Thinnest slice (rule 9). Match the neighbors (`rules/conventions.md` → Readability & fit).
+  Write the direct version: no new seam unless `architecture/MODULES.md` lists it or this is
+  its third occurrence (rule 6). If a change can be made by deleting code, delete.
+- Write the edge/error tests and the e2e test the contract names. Don't grade your own work.
+- Going over the §6 budget: write the reason in §6 before you continue.
+
+## 3. Verify
+Run `/harness-verify`. REVISE: fix the listed defects and repeat, up to MAX_ROUNDS
+(`loops/loop-state.md`). PASS: ask the user to run `/harness-record`.
+END>>>
+
+FILE: .claude/skills/harness-verify/SKILL.md
+<<<BEGIN
+---
+name: harness-verify
+description: Use after implementing a harness feature step, or when asked to verify, check, or score work against the harness rubric. Runs the full verify, then the evaluator and simplicity-reviewer subagents in fresh contexts.
+allowed-tools: Read, Grep, Glob, Bash(./scripts/*), Bash(git diff *), Bash(git status *)
+effort: high
+---
+
+# Harness verify — the Checker pass (rule 7)
+
+1. Run every verify command in `.harness/SESSION-CHECKLIST.md` → Commands: typecheck, lint,
+   the FULL test suite, check-architecture, e2e. Keep each exact command and its result. If
+   one is red, go back to the Maker; don't call the evaluator on red.
+2. Spawn the `evaluator` subagent. Give it the feature id, the sprint contract path and the
+   commands you ran. Don't explain why the code is right; it re-runs the checks and judges.
+3. Spawn the `simplicity-reviewer` subagent on the same diff.
+4. Update `loops/loop-state.md`: round, verdict, consecutivePasses, standing defects (the
+   evaluator's defects plus any simplicity findings not rebutted).
+5. Print the evaluator's scored block verbatim, including its `Verdict:` line (a `/goal`
+   condition reads it).
+
+PASS needs avg ≥ 4.0, no criterion at 1, and REQUIRED_PASSES consecutive passes.
+END>>>
+
+FILE: .claude/skills/harness-record/SKILL.md
+<<<BEGIN
+---
+name: harness-record
+description: Record a verified harness feature — evidence, tracking files, commit, push, PR and the review loop. Runs only when the user asks.
+disable-model-invocation: true
+allowed-tools: Read, Edit, Grep, Glob, Bash(git status *), Bash(git diff *), Bash(git add *), Bash(git commit *), Bash(git push -u origin *), Bash(gh pr list *), Bash(gh pr view *), Bash(gh pr create *), Bash(gh pr checks *)
+effort: medium
+---
+
+# Harness record — evidence, state, PR (rule 8)
+
+Precondition: `/harness-verify` printed `Verdict: PASS` for this FID REQUIRED_PASSES times in
+a row. Otherwise stop and say so.
+
+1. Add a `.harness/CHANGELOG.md` entry from its template: commands + results, full suite, e2e,
+   edge cases, the evaluator's score line. Binary evidence goes in `.harness/evidence/<FID>/`.
+2. Run `AGENTS.md` → Session-completion protocol: phase file, ROADMAP, CURRENT_TASK,
+   PROJECT_STATE, your LANES row, BLOCKERS/DECISIONS. The Stop hook blocks while these are stale.
+3. Commit (`rules/conventions.md` → Git). The PreToolUse hook re-runs the full suite if the
+   tree changed since its last green run.
+4. `loops/pr-review-loop.md`: push, open or reuse the PR (body = `.harness/reviews/<FID>-PR.md`),
+   run `/code-review`, then the `simplicity-reviewer` subagent. Fix findings as the Maker and
+   repeat, up to MAX_PR_ROUNDS.
+5. Clean + CI green: enqueue (`loops/integration-loop.md`). With MAX_LANES=1, ask the user
+   before merging to the default branch.
+6. Tell the user to `/clear` before the next feature: a feature boundary is a context boundary.
+END>>>
+
+FILE: .claude/skills/harness-lane/SKILL.md
+<<<BEGIN
+---
+name: harness-lane
+description: Parallel-mode lane operations — claim a ready feature, open its worktree session, list lanes, release a merged lane. Only when MAX_LANES > 1, and only when the user asks.
+disable-model-invocation: true
+argument-hint: claim <FID> | list | release <FID>
+allowed-tools: Read, Edit, Grep, Bash(git fetch *), Bash(git switch *), Bash(git pull --rebase *), Bash(git add *), Bash(git commit *), Bash(git push *), Bash(git worktree list *)
+effort: medium
+---
+
+# Harness lane — $ARGUMENTS
+
+If `MAX_LANES` in `.harness/LANES.md` is 1, say parallel mode is off and stop.
+
+- **claim <FID>**: follow `loops/parallel-loop.md` → Claim protocol exactly. The accepted push
+  is the mutex. If the push is rejected, rebase, re-check, and pick another ready feature;
+  never override a claim. Skip its `git worktree add` step. Instead, tell the user to run
+  `claude -w lane-<FID>`, then `/rename <FID>` and `/harness-feature` in that session. Record
+  branch `worktree-lane-<FID>` in the claim row.
+- **list**: the Claims table, the integration queue and `git worktree list`. Flag orphans
+  (`loops/failure-modes.md` → Parallel lanes).
+- **release <FID>**: only after the Integrator merged it green. Remove the claim row on `main`,
+  commit `chore(lanes): release <FID>`, push. Tell the user the worktree can be removed.
+
+Hand-offs to the Integrator go as a cross-session message with the PR link, CI-green evidence
+and the owned modules (`verification/roles.md` → Handoff rules).
+END>>>
+
+FILE: .claude/agents/evaluator.md
+<<<BEGIN
+---
+name: evaluator
+description: The harness Checker. Scores a feature against .harness/verification/evaluator-rubric.md in a fresh context, re-running every check itself. Use after implementation; never to write code.
+tools: Read, Grep, Glob, Bash
+disallowedTools: Edit, Write, NotebookEdit
+model: opus
+effort: high
+---
+
+You are the Evaluator in `.harness/verification/roles.md`. You did not write this code. Don't
+trust any summary of it.
+
+1. Read the feature's acceptance items (its phase file), its sprint contract (including the §6
+   budget), `verification/evaluator-rubric.md`, `acceptance-evidence.md`, `edge-cases.md`,
+   `rules/layer-boundaries.md`, `architecture/MODULES.md` and `rules/conventions.md` →
+   Readability & fit.
+2. Re-run the checks yourself (`SESSION-CHECKLIST.md` → Commands): the FULL suite,
+   check-architecture, and e2e for user-facing flows. Read the diff, plus 2–3 neighboring files
+   so you can judge fit.
+3. Probe the applicable edge-case categories the Maker skipped.
+4. Score all six criteria. Output the rubric's "Output format" block exactly, with its
+   `Verdict: PASS` or `Verdict: REVISE` line. Each defect names the criterion, the specific
+   defect, the failing evidence and the acceptance item it breaks.
+
+Never change files. Use Bash only to run checks and read git. A vague "looks good" is a failed
+evaluation.
+END>>>
+
+FILE: .claude/agents/simplicity-reviewer.md
+<<<BEGIN
+---
+name: simplicity-reviewer
+description: Fresh-context simplicity pass over a harness feature diff — asks only what could be deleted or inlined and still pass acceptance. Use in the PR review loop after the code review. Report-only.
+tools: Read, Grep, Glob, Bash
+disallowedTools: Edit, Write, NotebookEdit
+model: opus
+effort: high
+---
+
+One question: **what could be deleted or inlined and still pass the acceptance items?**
+
+Input: the feature's diff (committed since the base branch, plus uncommitted) and its sprint
+contract (§1 acceptance, §6 budget and neighbors).
+
+Look for (`.harness/verification/evaluator-rubric.md` criterion 6, `rules/conventions.md` →
+Readability & fit):
+- an abstraction with one caller, or a wrapper that only forwards;
+- a config knob with one value;
+- a factory, strategy, registry, adapter, base class or generic with one real case;
+- an extension point not listed in `architecture/MODULES.md`;
+- code that doesn't match its neighboring files;
+- anything removable outright.
+
+Don't review correctness, tests or style nits; the other review covers those.
+
+Output a list for `.harness/reviews/<FID>-simplicity.md`, one line per finding:
+`<file>:<line> — delete | inline | match-neighbor — <what> — <why acceptance still passes>`.
+End with `simplicity: <1-5>` per the rubric. If there is nothing to cut, say "nothing to cut".
+Never change files.
+END>>>
+
+FILE: .claude/agents/integrator.md
+<<<BEGIN
+---
+name: integrator
+description: Parallel-mode merge queue (.harness/loops/integration-loop.md) — lands queued lanes on main one at a time, with a full re-run on the integrated result. Use only when MAX_LANES > 1 and the integration queue is non-empty.
+tools: Read, Grep, Glob, Bash, Edit
+isolation: worktree
+model: sonnet
+effort: medium
+---
+
+You are the Integrator in `.harness/verification/roles.md`. Run `loops/integration-loop.md` →
+Cycle, one lane at a time, from the head of `LANES.md` → Integration queue. You work in your own
+worktree, starting from current `main`.
+
+- Conflict, or a red suite on the integrated result: don't touch feature code. Send the lane its
+  failing output as a message, bump integrateRound, re-queue it.
+- Green: merge to `main` without force-pushing. Update ROADMAP, CHANGELOG and LANES on `main` per
+  the loop, then release the claim. Edit only those tracking files.
+- Past MAX_INTEGRATE_ROUNDS: stop and escalate (`AGENTS.md` → Hard stops).
+END>>>
+
+═══════════════════════════════════════════════════════════════════════════════════════
 
 ## After scaffolding — the fill-in order
 
+The 6 repo-root entry-point files and `.harness/AGENTS.md` are machinery — written at scaffold
+time, never "filled". Whichever agent opens the repo is already wired to the contract. What you
+fill next depends on the **Mode**.
+
+### Greenfield (new repo)
+
 1. `product/PRODUCT.md` + `product/PERSONAS.md` — the why.
 2. Architecture — **only once you know the requirement.** Start from the closest shape in
-   `architecture/ARCHETYPES.md` (full-stack / DevOps-IaC / Airflow): fill `ARCHITECTURE.md` +
-   `MODULES.md` (+ `DATA_MODEL.md` / `API_SURFACE.md` only if that archetype uses them) → then
-   encode the real import rules in `rules/layer-boundaries.md`, which flips check-architecture
-   from no-op to enforcing. The loop can build features before this step; do it when the shape
-   is actually decided, not sooner.
+   `architecture/ARCHETYPES.md` (full-stack / DevOps-IaC / Airflow / docs-tooling): fill
+   `ARCHITECTURE.md` + `MODULES.md` (+ `DATA_MODEL.md` / `API_SURFACE.md` only if that archetype
+   uses them) → then encode the real import rules in `rules/layer-boundaries.md`, which flips
+   check-architecture from no-op to enforcing. The loop can build features before this step; do
+   it when the shape is actually decided, not sooner.
 3. `ROADMAP.md` — the phases and features (permanent F-ids) with each feature's `deps:` and a
    **parallel plan** (which run at once vs. which chain) → then the per-phase
    `phases/PHASE-XX-*.md` acceptance criteria (each with its `Depends on:`).
 4. `rules/scope-guard.md` — the in-scope / off-limits lists from the ROADMAP phases.
-5. `CLAUDE.md` → Commands — your toolchain, including the `test` (full suite) and `e2e`
+5. `SESSION-CHECKLIST.md` → Commands — your toolchain, including the `test` (full suite) and `e2e`
    commands; `AGENTS.md` → Tech stack — the locked stack.
+   (Claude layer: add the same commands to `.claude/settings.json` → `permissions.allow`; the
+   hooks' gates read the "Test (full suite)" and "Check boundaries" rows.)
 6. First `PROJECT_STATE.md` + `CURRENT_TASK.md` + `loops/loop-state.md` — point at F001.
 7. Implement `scripts/init.sh` + `scripts/check-architecture.sh` as part of F001 (the loop
    needs them immediately); stand up the `e2e`/`smoke` runner + CI with the first user-facing
@@ -2471,6 +3519,28 @@ END>>>
    ready features: set `MAX_LANES > 1` in `LANES.md`, implement `lane` + `integrate`
    (`scripts/SCRIPTS.md`), and run `loops/parallel-loop.md` + `loops/integration-loop.md`.
    Leave `MAX_LANES=1` and nothing changes — the classic single-feature loop.
+
+### Adopt (existing repo) — fill from reality, now (see *Adopt procedure* at the top)
+
+Same files, but reverse-engineered from the code, not drafted from a fresh spec, and done
+during the bootstrap rather than "later":
+1. Survey the codebase; record the stack, archetype, module map, and baseline test status in
+   `ADOPTION.md`.
+2. `SESSION-CHECKLIST.md` → Commands + `AGENTS.md` → Tech stack — from the real manifest/scripts.
+   (Claude layer: add them to `.claude/settings.json` → `permissions.allow` too.)
+3. Architecture — pick the archetype, fill `ARCHITECTURE.md` + `MODULES.md` (+ `DATA_MODEL.md` /
+   `API_SURFACE.md` where they apply) from the real structure, and write **real**
+   `rules/layer-boundaries.md` from the imports the code already follows (check-architecture
+   becomes enforcing immediately; existing violations → `BLOCKERS.md` as debt).
+4. `product/PRODUCT.md` + `PERSONAS.md` — reverse-engineered from what the project clearly does.
+5. `ROADMAP.md` — shipped capabilities as `F0xx` `COMPLETE` (evidence "adopted (pre-harness);
+   baseline green" in `CHANGELOG.md`) + the next `NOT STARTED` increment(s); then
+   `rules/scope-guard.md` + the active `phases/PHASE-XX-*.md`.
+6. `PROJECT_STATE.md` + `CURRENT_TASK.md` + `loops/loop-state.md` — point at the next real
+   feature (not a from-scratch F001).
+7. Wrappers only: add `check-architecture` + the `e2e`/`smoke` runner where missing; reuse the
+   repo's existing install/test/build as the baseline. Then run the loop on the first real
+   increment — any change to an adopted area re-enters the full loop and earns real evidence.
 
 `verification/edge-cases.md`, `loops/failure-modes.md`, `loops/parallel-loop.md`,
 `loops/integration-loop.md`, and `architecture/ARCHETYPES.md` are machinery — nothing to fill;
